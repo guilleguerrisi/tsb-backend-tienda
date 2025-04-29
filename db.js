@@ -9,4 +9,53 @@ const pool = new Pool({
   },
 });
 
-module.exports = pool;
+// ============================
+// 📦 FUNCIONES PEDIDOS TIENDA
+// ============================
+
+// Crear un nuevo pedido
+const crearPedidoTienda = async (nuevoPedido) => {
+  const { fecha_pedido, cliente_tienda, array_pedido } = nuevoPedido;
+
+  try {
+    const query = `
+      INSERT INTO pedidostienda (fecha_pedido, cliente_tienda, array_pedido)
+      VALUES ($1, $2, $3)
+      RETURNING id
+    `;
+    const values = [fecha_pedido, cliente_tienda, array_pedido];
+    const { rows } = await pool.query(query, values);
+
+    return { data: rows[0], error: null };
+  } catch (error) {
+    console.error('❌ Error en crearPedidoTienda:', error);
+    return { data: null, error };
+  }
+};
+
+// Obtener un pedido por su ID
+const obtenerPedidoTiendaPorId = async (id) => {
+  try {
+    const query = `
+      SELECT * FROM pedidostienda
+      WHERE id = $1
+    `;
+    const values = [id];
+    const { rows } = await pool.query(query, values);
+
+    if (rows.length === 0) {
+      return { data: null, error: 'Pedido no encontrado' };
+    }
+
+    return { data: rows[0], error: null };
+  } catch (error) {
+    console.error('❌ Error en obtenerPedidoTiendaPorId:', error);
+    return { data: null, error };
+  }
+};
+
+module.exports = {
+  pool, // ➡️ exporto también el pool por si lo usás directo en otros lugares
+  crearPedidoTienda,
+  obtenerPedidoTiendaPorId,
+};
