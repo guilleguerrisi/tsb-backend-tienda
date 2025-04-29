@@ -11,8 +11,9 @@ app.use(express.json());
 //INICIO DE SISTEMA VERIFICACION DE USUARIO
 
 // 🔒 Verificar si un device_id está autorizado
+// 🔒 Verificar si un device_id (nombre_usuario) está autorizado
 app.post('/api/verificar-dispositivo', async (req, res) => {
-  const { device_id } = req.body;
+  const { device_id } = req.body; // En frontend seguimos mandando device_id
 
   if (!device_id) {
     return res.status(400).json({ autorizado: false, error: 'Device ID requerido' });
@@ -21,8 +22,8 @@ app.post('/api/verificar-dispositivo', async (req, res) => {
   try {
     const query = `
       SELECT id
-      FROM dispositivos_autorizados
-      WHERE device_id = $1
+      FROM usuarios_admin
+      WHERE nombre_usuario = $1
       LIMIT 1
     `;
     const values = [device_id];
@@ -35,10 +36,11 @@ app.post('/api/verificar-dispositivo', async (req, res) => {
       return res.json({ autorizado: false });
     }
   } catch (error) {
-    console.error('❌ Error al verificar dispositivo autorizado:', error);
+    console.error('❌ Error al verificar usuario autorizado:', error);
     return res.status(500).json({ autorizado: false, error: 'Error interno' });
   }
 });
+
 
 
 
