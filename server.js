@@ -6,6 +6,42 @@ const { pool, crearPedidoTienda, obtenerPedidoTiendaPorId } = require('./db'); /
 app.use(cors());
 app.use(express.json());
 
+
+
+//INICIO DE SISTEMA VERIFICACION DE USUARIO
+
+// 🔒 Verificar si un device_id está autorizado
+app.post('/api/verificar-dispositivo', async (req, res) => {
+  const { device_id } = req.body;
+
+  if (!device_id) {
+    return res.status(400).json({ autorizado: false, error: 'Device ID requerido' });
+  }
+
+  try {
+    const query = `
+      SELECT id
+      FROM dispositivos_autorizados
+      WHERE device_id = $1
+      LIMIT 1
+    `;
+    const values = [device_id];
+
+    const { rows } = await pool.query(query, values);
+
+    if (rows.length > 0) {
+      return res.json({ autorizado: true });
+    } else {
+      return res.json({ autorizado: false });
+    }
+  } catch (error) {
+    console.error('❌ Error al verificar dispositivo autorizado:', error);
+    return res.status(500).json({ autorizado: false, error: 'Error interno' });
+  }
+});
+
+
+
 // ✅ Obtener categorías visibles desde la tabla "gcategorias"
 app.get('/api/categorias', async (req, res) => {
   try {
