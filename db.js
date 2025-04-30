@@ -15,15 +15,22 @@ const pool = new Pool({
 
 // Crear un nuevo pedido
 const crearPedidoTienda = async (nuevoPedido) => {
-  const { fecha_pedido, cliente_tienda, array_pedido } = nuevoPedido;
+  const {
+    fecha_pedido,
+    cliente_tienda,
+    array_pedido,
+    contacto_cliente,
+    mensaje_cliente
+  } = nuevoPedido;
 
   try {
     const query = `
-      INSERT INTO pedidostienda (fecha_pedido, cliente_tienda, array_pedido)
-      VALUES ($1, $2, $3)
+      INSERT INTO pedidostienda 
+      (fecha_pedido, cliente_tienda, array_pedido, contacto_cliente, mensaje_cliente)
+      VALUES ($1, $2, $3, $4, $5)
       RETURNING id
     `;
-    const values = [fecha_pedido, cliente_tienda, array_pedido];
+    const values = [fecha_pedido, cliente_tienda, array_pedido, contacto_cliente, mensaje_cliente];
     const { rows } = await pool.query(query, values);
 
     return { data: rows[0], error: null };
@@ -32,6 +39,7 @@ const crearPedidoTienda = async (nuevoPedido) => {
     return { data: null, error };
   }
 };
+
 
 // Obtener un pedido por su ID
 const obtenerPedidoTiendaPorId = async (id) => {
