@@ -10,7 +10,7 @@ app.use(express.json());
 
 //INICIO DE SISTEMA VERIFICACION DE USUARIO
 
-// 🔒 Verificar si un device_id está autorizado
+
 // 🔒 Verificar si un device_id (nombre_usuario) está autorizado
 app.post('/api/verificar-dispositivo', async (req, res) => {
   const { device_id } = req.body; // En frontend seguimos mandando device_id
