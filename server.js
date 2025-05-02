@@ -103,7 +103,7 @@ app.post('/api/pedidos', async (req, res) => {
       return res.status(500).json({ error: 'Error al crear pedido' });
     }
 
-    res.json({ id: data.id });
+    res.json({ data: { id: data.id } });
   } catch (err) {
     console.error('❌ Error inesperado al crear pedido tienda:', err);
     res.status(500).json({ error: 'Error interno del servidor' });
