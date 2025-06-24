@@ -50,7 +50,7 @@ app.post('/api/verificar-dispositivo', async (req, res) => {
 app.get('/api/categorias', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT grandescategorias, grcat
+      SELECT grandescategorias, grcat, imagen_url
       FROM gcategorias
       WHERE LOWER(mostrarcat) = 'mostrar'
       ORDER BY grandescategorias;
@@ -62,6 +62,7 @@ app.get('/api/categorias', async (req, res) => {
     res.status(500).json({ error: 'Error al obtener categorías' });
   }
 });
+
 
 // ✅ Obtener productos filtrados por "grcat" (buscando coincidencias en "palabrasclave2")
 app.get('/api/mercaderia', async (req, res) => {
