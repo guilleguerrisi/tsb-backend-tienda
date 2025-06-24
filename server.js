@@ -53,7 +53,7 @@ app.get('/api/categorias', async (req, res) => {
       SELECT grandescategorias, grcat, imagen_url
       FROM gcategorias
       WHERE LOWER(mostrarcat) = 'mostrar'
-      ORDER BY grandescategorias;
+      
     `);
 
     res.json(result.rows);
