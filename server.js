@@ -63,6 +63,30 @@ app.get('/api/categorias', async (req, res) => {
   }
 });
 
+// ✅ Buscar categorías por palabra clave (usando pc_categorias)
+app.get('/api/buscar-categorias', async (req, res) => {
+  const { palabra } = req.query;
+
+  if (!palabra || palabra.trim() === '') {
+    return res.status(400).json({ error: 'Falta palabra clave para buscar' });
+  }
+
+  try {
+    const query = `
+      SELECT id, grandescategorias, grcat, imagen_url
+      FROM gcategorias
+      WHERE pc_categorias ILIKE '%' || $1 || '%'
+      AND mostrarcat ILIKE 'mostrar'
+    `;
+    const values = [palabra.trim()];
+    const result = await pool.query(query, values);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error en /api/buscar-categorias:', error.message);
+    res.status(500).json({ error: 'Error al buscar categorías' });
+  }
+});
+
 
 // ✅ Obtener productos filtrados por "grcat" (buscando coincidencias en "palabrasclave2")
 app.get('/api/mercaderia', async (req, res) => {
