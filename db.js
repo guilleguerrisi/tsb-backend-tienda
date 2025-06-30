@@ -40,6 +40,30 @@ const crearPedidoTienda = async (nuevoPedido) => {
   }
 };
 
+// Buscar un pedido existente por cliente_tienda
+const obtenerPedidoPorCliente = async (cliente_tienda) => {
+  try {
+    const query = `
+      SELECT id FROM pedidostienda
+      WHERE cliente_tienda = $1
+      ORDER BY fecha_pedido DESC
+      LIMIT 1
+    `;
+    const values = [cliente_tienda];
+    const { rows } = await pool.query(query, values);
+
+    if (rows.length === 0) {
+      return { data: null, error: null }; // no es error si no existe
+    }
+
+    return { data: rows[0], error: null };
+  } catch (error) {
+    console.error('❌ Error en obtenerPedidoPorCliente:', error);
+    return { data: null, error };
+  }
+};
+
+
 
 // Obtener un pedido por su ID
 const obtenerPedidoTiendaPorId = async (id) => {
@@ -66,4 +90,5 @@ module.exports = {
   pool, // ➡️ exporto también el pool por si lo usás directo en otros lugares
   crearPedidoTienda,
   obtenerPedidoTiendaPorId,
+  obtenerPedidoPorCliente,
 };

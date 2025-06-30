@@ -1,21 +1,22 @@
 const express = require('express');
 const cors = require('cors');
 const app = express();
-const { pool, crearPedidoTienda, obtenerPedidoTiendaPorId } = require('./db'); // conexión a PostgreSQL y funciones
+const {
+  pool,
+  crearPedidoTienda,
+  obtenerPedidoTiendaPorId,
+  obtenerPedidoPorCliente,
+} = require('./db');
 
 app.use(cors());
 app.use(express.json());
 
+// ============================
+// 🔒 VERIFICACIÓN DE USUARIO
+// ============================
 
-
-
-
-//INICIO DE SISTEMA VERIFICACION DE USUARIO
-
-
-// 🔒 Verificar si un device_id (nombre_usuario) está autorizado
 app.post('/api/verificar-dispositivo', async (req, res) => {
-  const { device_id } = req.body; // En frontend seguimos mandando device_id
+  const { device_id } = req.body;
 
   if (!device_id) {
     return res.status(400).json({ autorizado: false, error: 'Device ID requerido' });
@@ -29,7 +30,6 @@ app.post('/api/verificar-dispositivo', async (req, res) => {
       LIMIT 1
     `;
     const values = [device_id];
-
     const { rows } = await pool.query(query, values);
 
     if (rows.length > 0) {
@@ -43,19 +43,18 @@ app.post('/api/verificar-dispositivo', async (req, res) => {
   }
 });
 
+// ============================
+// 📦 CATEGORÍAS Y PRODUCTOS
+// ============================
 
-
-
-// ✅ Obtener categorías visibles desde la tabla "gcategorias"
+// Categorías visibles
 app.get('/api/categorias', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT grandescategorias, grcat, imagen_url
       FROM gcategorias
       WHERE LOWER(mostrarcat) = 'mostrar'
-      
     `);
-
     res.json(result.rows);
   } catch (err) {
     console.error('❌ Error al obtener categorías:', err.message);
@@ -63,7 +62,7 @@ app.get('/api/categorias', async (req, res) => {
   }
 });
 
-// ✅ Buscar categorías por palabra clave (usando pc_categorias)
+// Búsqueda de categorías por palabra clave
 app.get('/api/buscar-categorias', async (req, res) => {
   const { palabra } = req.query;
 
@@ -87,8 +86,7 @@ app.get('/api/buscar-categorias', async (req, res) => {
   }
 });
 
-
-// ✅ Obtener productos filtrados por "grcat" (buscando coincidencias en "palabrasclave2")
+// Productos por grcat
 app.get('/api/mercaderia', async (req, res) => {
   try {
     const { grcat } = req.query;
@@ -113,39 +111,10 @@ app.get('/api/mercaderia', async (req, res) => {
 });
 
 // ============================
-// 🛒 RUTAS PEDIDOS TIENDA
+// 🛒 RUTAS DE PEDIDOS TIENDA
 // ============================
 
-
-// Actualizar pedido (solo el array_pedido y mensaje)
-app.patch('/api/pedidos/:id', async (req, res) => {
-  const { id } = req.params;
-  const { array_pedido, mensaje_cliente } = req.body;
-
-  try {
-    const query = `
-      UPDATE pedidostienda
-      SET array_pedido = $1, mensaje_cliente = COALESCE($2, mensaje_cliente)
-      WHERE id = $3
-      RETURNING id
-    `;
-    const values = [array_pedido, mensaje_cliente || null, id];
-
-    const { rows } = await pool.query(query, values);
-
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Pedido no encontrado' });
-    }
-
-    res.json({ data: { id: rows[0].id } });
-  } catch (err) {
-    console.error('❌ Error al actualizar pedido tienda:', err);
-    res.status(500).json({ error: 'Error interno del servidor' });
-  }
-});
-
-
-// Guardar un nuevo pedido
+// Crear nuevo pedido
 app.post('/api/pedidos', async (req, res) => {
   const nuevoPedido = req.body;
 
@@ -164,7 +133,7 @@ app.post('/api/pedidos', async (req, res) => {
   }
 });
 
-// Obtener un pedido por ID
+// Obtener pedido por ID
 app.get('/api/pedidos/:id', async (req, res) => {
   const { id } = req.params;
 
@@ -183,7 +152,59 @@ app.get('/api/pedidos/:id', async (req, res) => {
   }
 });
 
-// ✅ Inicializar servidor
+// Obtener último pedido por cliente
+app.get('/api/pedidos/cliente/:clienteID', async (req, res) => {
+  const { clienteID } = req.params;
+
+  try {
+    const { data, error } = await obtenerPedidoPorCliente(clienteID);
+
+    if (error) {
+      console.error('❌ Error al buscar pedido por cliente:', error);
+      return res.status(500).json({ error: 'Error interno del servidor' });
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: 'No se encontró pedido para ese cliente' });
+    }
+
+    res.json(data);
+  } catch (err) {
+    console.error('❌ Error inesperado al buscar pedido por cliente:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// Actualizar pedido (array_pedido + mensaje_cliente)
+app.patch('/api/pedidos/:id', async (req, res) => {
+  const { id } = req.params;
+  const { array_pedido, mensaje_cliente } = req.body;
+
+  try {
+    const query = `
+      UPDATE pedidostienda
+      SET array_pedido = $1, mensaje_cliente = COALESCE($2, mensaje_cliente)
+      WHERE id = $3
+      RETURNING id
+    `;
+    const values = [array_pedido, mensaje_cliente || null, id];
+    const { rows } = await pool.query(query, values);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Pedido no encontrado' });
+    }
+
+    res.json({ data: { id: rows[0].id } });
+  } catch (err) {
+    console.error('❌ Error al actualizar pedido tienda:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// ============================
+// 🚀 INICIAR SERVIDOR
+// ============================
+
 const PORT = 5000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Servidor backend corriendo en el puerto ${PORT}`);
