@@ -116,6 +116,35 @@ app.get('/api/mercaderia', async (req, res) => {
 // 🛒 RUTAS PEDIDOS TIENDA
 // ============================
 
+
+// Actualizar pedido (solo el array_pedido y mensaje)
+app.patch('/api/pedidos/:id', async (req, res) => {
+  const { id } = req.params;
+  const { array_pedido, mensaje_cliente } = req.body;
+
+  try {
+    const query = `
+      UPDATE pedidostienda
+      SET array_pedido = $1, mensaje_cliente = COALESCE($2, mensaje_cliente)
+      WHERE id = $3
+      RETURNING id
+    `;
+    const values = [array_pedido, mensaje_cliente || null, id];
+
+    const { rows } = await pool.query(query, values);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Pedido no encontrado' });
+    }
+
+    res.json({ data: { id: rows[0].id } });
+  } catch (err) {
+    console.error('❌ Error al actualizar pedido tienda:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+
 // Guardar un nuevo pedido
 app.post('/api/pedidos', async (req, res) => {
   const nuevoPedido = req.body;
