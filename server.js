@@ -176,18 +176,34 @@ app.get('/api/pedidos/cliente/:clienteID', async (req, res) => {
 });
 
 // Actualizar pedido (array_pedido + mensaje_cliente)
+// Actualizar pedido (array_pedido + mensaje_cliente + contacto_cliente + nombre_cliente)
 app.patch('/api/pedidos/:id', async (req, res) => {
   const { id } = req.params;
-  const { array_pedido, mensaje_cliente } = req.body;
+  const {
+    array_pedido,
+    mensaje_cliente,
+    contacto_cliente,
+    nombre_cliente
+  } = req.body;
 
   try {
     const query = `
       UPDATE pedidostienda
-      SET array_pedido = $1, mensaje_cliente = COALESCE($2, mensaje_cliente)
-      WHERE id = $3
+      SET
+        array_pedido = COALESCE($1, array_pedido),
+        mensaje_cliente = COALESCE($2, mensaje_cliente),
+        contacto_cliente = COALESCE($3, contacto_cliente),
+        nombre_cliente = COALESCE($4, nombre_cliente)
+      WHERE id = $5
       RETURNING id
     `;
-    const values = [array_pedido, mensaje_cliente || null, id];
+    const values = [
+      array_pedido || null,
+      mensaje_cliente || null,
+      contacto_cliente || null,
+      nombre_cliente || null,
+      id
+    ];
     const { rows } = await pool.query(query, values);
 
     if (rows.length === 0) {
@@ -200,6 +216,7 @@ app.patch('/api/pedidos/:id', async (req, res) => {
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
+
 
 // ============================
 // 🚀 INICIAR SERVIDOR
