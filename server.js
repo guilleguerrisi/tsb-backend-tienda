@@ -47,13 +47,19 @@ app.post('/api/verificar-dispositivo', async (req, res) => {
 // 📦 CATEGORÍAS Y PRODUCTOS
 // ============================
 
-// Categorías visibles
+// Categorías visibles (incluye catcat y ordena por su valor numérico)
 app.get('/api/categorias', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT grandescategorias, grcat, imagen_url
+      SELECT id, grandescategorias, grcat, imagen_url, catcat
       FROM gcategorias
       WHERE LOWER(mostrarcat) = 'mostrar'
+      ORDER BY
+        CASE
+          WHEN catcat ~ '^[0-9]+([,.][0-9]+)?$' THEN REPLACE(catcat, ',', '.')::numeric
+          ELSE NULL
+        END NULLS LAST,
+        grandescategorias ASC
     `);
     res.json(result.rows);
   } catch (err) {
@@ -62,7 +68,7 @@ app.get('/api/categorias', async (req, res) => {
   }
 });
 
-// Búsqueda de categorías por palabra clave
+// Búsqueda de categorías por palabra clave (incluye catcat y ordena)
 app.get('/api/buscar-categorias', async (req, res) => {
   const { palabra } = req.query;
 
@@ -72,10 +78,16 @@ app.get('/api/buscar-categorias', async (req, res) => {
 
   try {
     const query = `
-      SELECT id, grandescategorias, grcat, imagen_url
+      SELECT id, grandescategorias, grcat, imagen_url, catcat
       FROM gcategorias
       WHERE pc_categorias ILIKE '%' || $1 || '%'
-      AND mostrarcat ILIKE 'mostrar'
+        AND mostrarcat ILIKE 'mostrar'
+      ORDER BY
+        CASE
+          WHEN catcat ~ '^[0-9]+([,.][0-9]+)?$' THEN REPLACE(catcat, ',', '.')::numeric
+          ELSE NULL
+        END NULLS LAST,
+        grandescategorias ASC
     `;
     const values = [palabra.trim()];
     const result = await pool.query(query, values);
@@ -175,7 +187,6 @@ app.get('/api/pedidos/cliente/:clienteID', async (req, res) => {
   }
 });
 
-// Actualizar pedido (array_pedido + mensaje_cliente)
 // Actualizar pedido (array_pedido + mensaje_cliente + contacto_cliente + nombre_cliente)
 app.patch('/api/pedidos/:id', async (req, res) => {
   const { id } = req.params;
@@ -216,7 +227,6 @@ app.patch('/api/pedidos/:id', async (req, res) => {
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
-
 
 // ============================
 // 🚀 INICIAR SERVIDOR
