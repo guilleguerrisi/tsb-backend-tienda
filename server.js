@@ -1,3 +1,4 @@
+// server.js
 const express = require('express');
 const cors = require('cors');
 const app = express();
@@ -47,7 +48,10 @@ app.post('/api/verificar-dispositivo', async (req, res) => {
 // 📦 CATEGORÍAS Y PRODUCTOS
 // ============================
 
-// Categorías visibles (incluye catcat y ordena por su valor numérico)
+// Categorías visibles
+// ✅ Orden robusto por número en catcat, funcione si catcat es TEXT o INTEGER.
+//    - Extrae el PRIMER número (permite coma o punto) desde catcat::text.
+//    - Si no hay número, queda al final (NULLS LAST).
 app.get('/api/categorias', async (req, res) => {
   try {
     const result = await pool.query(`
@@ -55,10 +59,12 @@ app.get('/api/categorias', async (req, res) => {
       FROM gcategorias
       WHERE LOWER(mostrarcat) = 'mostrar'
       ORDER BY
-        CASE
-          WHEN catcat ~ '^[0-9]+([,.][0-9]+)?$' THEN REPLACE(catcat, ',', '.')::numeric
-          ELSE NULL
-        END NULLS LAST,
+        (
+          REPLACE(
+            SUBSTRING(TRIM(catcat::text) FROM '(-?[0-9]+(?:[.,][0-9]+)?)'),
+            ',', '.'
+          )
+        )::numeric NULLS LAST,
         grandescategorias ASC
     `);
     res.json(result.rows);
@@ -68,7 +74,8 @@ app.get('/api/categorias', async (req, res) => {
   }
 });
 
-// Búsqueda de categorías por palabra clave (incluye catcat y ordena)
+// Búsqueda de categorías por palabra clave
+// ✅ Mismo orden numérico robusto que arriba.
 app.get('/api/buscar-categorias', async (req, res) => {
   const { palabra } = req.query;
 
@@ -83,10 +90,12 @@ app.get('/api/buscar-categorias', async (req, res) => {
       WHERE pc_categorias ILIKE '%' || $1 || '%'
         AND mostrarcat ILIKE 'mostrar'
       ORDER BY
-        CASE
-          WHEN catcat ~ '^[0-9]+([,.][0-9]+)?$' THEN REPLACE(catcat, ',', '.')::numeric
-          ELSE NULL
-        END NULLS LAST,
+        (
+          REPLACE(
+            SUBSTRING(TRIM(catcat::text) FROM '(-?[0-9]+(?:[.,][0-9]+)?)'),
+            ',', '.'
+          )
+        )::numeric NULLS LAST,
         grandescategorias ASC
     `;
     const values = [palabra.trim()];
