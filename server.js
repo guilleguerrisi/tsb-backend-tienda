@@ -108,28 +108,54 @@ app.get('/api/buscar-categorias', async (req, res) => {
 });
 
 // Productos por grcat
+// Productos por categoría o por búsqueda
 app.get('/api/mercaderia', async (req, res) => {
   try {
-    const { grcat } = req.query;
+    const { grcat, buscar } = req.query;
 
-    let query = `
-      SELECT * FROM mercaderia
-      WHERE visibilidad = 'MOSTRAR'
-    `;
+    const where = [`visibilidad = 'MOSTRAR'`];
     const values = [];
 
+    // Filtro por categoría (exacto)
     if (grcat && grcat.trim() !== '') {
-      query += ` AND palabrasclave2 ILIKE '%' || $1 || '%'`;
       values.push(grcat.trim());
+      where.push(`grcat = $${values.length}`);
     }
 
-    const result = await pool.query(query, values);
-    res.json(result.rows);
+    // Filtro por búsqueda en palabrasclave2 (y de yapa descripcion_corta)
+    if (buscar && buscar.trim() !== '') {
+      values.push(`%${buscar.trim()}%`);
+      where.push(`(palabrasclave2 ILIKE $${values.length} OR descripcion_corta ILIKE $${values.length})`);
+    }
+
+    const sql = `
+      SELECT
+        id,
+        codigo_int,
+        descripcion_corta,
+        imagen1,
+        imagearray,
+        costosiniva,
+        iva,
+        margen,
+        grupo,
+        grcat,
+        fechaordengrupo,
+        visibilidad
+      FROM mercaderia
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY COALESCE(fechaordengrupo, '') DESC, codigo_int ASC
+      LIMIT 1000;
+    `;
+
+    const { rows } = await pool.query(sql, values);
+    res.json(rows);
   } catch (err) {
     console.error('❌ Error al obtener productos:', err.message);
     res.status(500).json({ error: 'Error al obtener productos' });
   }
 });
+
 
 // ============================
 // 🛒 RUTAS DE PEDIDOS TIENDA
