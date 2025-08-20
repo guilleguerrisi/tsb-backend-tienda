@@ -109,20 +109,39 @@ app.get('/api/buscar-categorias', async (req, res) => {
 
 // Productos por grcat
 // Productos por categoría o por búsqueda
+// Productos por categoría o por búsqueda (búsqueda por CONTIENE en palabrasclave2, con múltiples términos)
 app.get('/api/mercaderia', async (req, res) => {
   try {
     const { grcat, buscar } = req.query;
+
     const where = [];
     const values = [];
 
+    // Filtro por categoría (igualdad exacta)
     if (grcat && grcat.trim() !== '') {
       values.push(grcat.trim());
       where.push(`grcat = $${values.length}`);
     }
 
+    // Filtro por búsqueda "contiene" en palabrasclave2 (soporta varios términos separados por espacio o coma)
     if (buscar && buscar.trim() !== '') {
-      values.push(`%${buscar.trim()}%`);
-      where.push(`COALESCE(palabrasclave2, '') ILIKE $${values.length}`);
+      const tokens = buscar
+        .split(/[,\s]+/g)
+        .map(t => t.trim())
+        .filter(Boolean);
+
+      if (tokens.length > 0) {
+        const sub = tokens.map(() => {
+          values.push(`%${tokens[values.length - (grcat ? 1 : 0)] ?? ''}%`); // placeholder, se reemplaza abajo
+          return `COALESCE(palabrasclave2, '') ILIKE $${values.length}`;
+        });
+        // Corregir push de values con los tokens reales
+        values.splice(grcat ? 1 : 0); // reset después del primer push si había grcat
+        if (grcat && grcat.trim() !== '') values.push(grcat.trim()); // reinsert grcat
+        for (const tok of tokens) values.push(`%${tok}%`);
+
+        where.push(`(${sub.join(' AND ')})`);
+      }
     }
 
     const sql = `
@@ -140,7 +159,7 @@ app.get('/api/mercaderia', async (req, res) => {
         fechaordengrupo
       FROM mercaderia
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-      ORDER BY fechaordengrupo DESC NULLS LAST, codigo_int ASC
+      ORDER BY codigo_int ASC
       LIMIT 1000;
     `;
 
@@ -148,12 +167,24 @@ app.get('/api/mercaderia', async (req, res) => {
     console.log('➡️ /api/mercaderia values:', values);
 
     const { rows } = await pool.query(sql, values);
-    res.json(rows);
+    res.json(rows); // el frontend espera SIEMPRE un array
   } catch (err) {
-    console.error('❌ Error al obtener productos:', err);
-    res.status(500).json({ error: 'Error al obtener productos' });
+    console.error('❌ Error al obtener productos:', {
+      message: err.message,
+      code: err.code,
+      detail: err.detail,
+      where: err.where,
+      stack: err.stack,
+    });
+    res.status(500).json({
+      error: 'DB_ERROR',
+      message: err.message,
+      code: err.code,
+      detail: err.detail,
+    });
   }
 });
+
 
 
 
