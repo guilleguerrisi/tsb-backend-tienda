@@ -112,20 +112,17 @@ app.get('/api/buscar-categorias', async (req, res) => {
 app.get('/api/mercaderia', async (req, res) => {
   try {
     const { grcat, buscar } = req.query;
-
-    const where = [`visibilidad = 'MOSTRAR'`];
+    const where = [];
     const values = [];
 
-    // Filtro por categoría (exacto)
     if (grcat && grcat.trim() !== '') {
       values.push(grcat.trim());
       where.push(`grcat = $${values.length}`);
     }
 
-    // Filtro por búsqueda en palabrasclave2 (y de yapa descripcion_corta)
     if (buscar && buscar.trim() !== '') {
       values.push(`%${buscar.trim()}%`);
-      where.push(`(palabrasclave2 ILIKE $${values.length} OR descripcion_corta ILIKE $${values.length})`);
+      where.push(`COALESCE(palabrasclave2, '') ILIKE $${values.length}`);
     }
 
     const sql = `
@@ -140,21 +137,24 @@ app.get('/api/mercaderia', async (req, res) => {
         margen,
         grupo,
         grcat,
-        fechaordengrupo,
-        visibilidad
+        fechaordengrupo
       FROM mercaderia
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       ORDER BY COALESCE(fechaordengrupo, '') DESC, codigo_int ASC
       LIMIT 1000;
     `;
 
+    console.log('➡️ /api/mercaderia SQL:', sql.replace(/\s+/g, ' ').trim());
+    console.log('➡️ /api/mercaderia values:', values);
+
     const { rows } = await pool.query(sql, values);
-    res.json(rows);
+    res.json(rows); // el frontend espera SIEMPRE un array acá
   } catch (err) {
-    console.error('❌ Error al obtener productos:', err.message);
+    console.error('❌ Error al obtener productos:', err);
     res.status(500).json({ error: 'Error al obtener productos' });
   }
 });
+
 
 
 // ============================
