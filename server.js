@@ -112,6 +112,13 @@ app.get('/api/buscar-categorias', async (req, res) => {
 // Productos por categoría (grcat) o por búsqueda (tokens "contiene")
 // Admite: ?buscar=cat00083  |  ?buscar=vasos cristal  |  ?buscar=cat00083 vasos
 // Orden: grupo ASC, fechaordengrupo DESC, luego código
+// Productos por categoría (grcat) y/o por búsqueda por tokens (contiene)
+// Admite:
+//   ?buscar=cat00083
+//   ?buscar=vasos cristal
+//   ?buscar=cat00083 vasos
+//   ?grcat=cat00083 (se combina si viene junto con buscar)
+// Orden: grupo ASC, fechaordengrupo DESC, codigo_int ASC
 app.get('/api/mercaderia', async (req, res) => {
   try {
     const { grcat, buscar } = req.query;
@@ -119,13 +126,22 @@ app.get('/api/mercaderia', async (req, res) => {
     const where = [`COALESCE(m.visibilidad,'') ILIKE 'MOSTRAR'`];
     const values = [];
 
-    // --- 1) Filtrado por categoría explícita (param grcat)
+    // ---- 1) Param grcat explícito
     if (grcat && grcat.trim() !== '') {
       values.push(grcat.trim());
-      where.push(`c.grcat = $${values.length}`);
+      const idx = values.length;
+      // Existe una categoría cuyo grcat coincide y su grandescategorias matchea el grupo del producto
+      where.push(`
+        EXISTS (
+          SELECT 1
+          FROM gcategorias c
+          WHERE c.grcat = $${idx}
+            AND LOWER(TRIM(c.grandescategorias)) = LOWER(TRIM(m.grupo))
+        )
+      `);
     }
 
-    // --- 2) Param "buscar": puede traer códigos de categoría (cat00083) y/o palabras
+    // ---- 2) Param buscar: tokens "catXXXXX" y/o palabras
     let catTokens = [];
     let wordTokens = [];
     if (buscar && buscar.trim() !== '') {
@@ -134,29 +150,43 @@ app.get('/api/mercaderia', async (req, res) => {
         .map(t => t.trim())
         .filter(Boolean);
 
-      // Separa tokens tipo cat00083 de palabras normales
       catTokens = tokens.filter(t => /^cat\d+$/i.test(t)).map(t => t.toLowerCase());
       wordTokens = tokens.filter(t => !/^cat\d+$/i.test(t));
     }
 
-    // 2a) Si en "buscar" vinieron códigos de categoría, filtra por c.grcat (IN ó =)
+    // 2a) Si vinieron códigos de categoría en "buscar"
     if (catTokens.length === 1) {
       values.push(catTokens[0]);
-      where.push(`c.grcat = $${values.length}`);
+      const idx = values.length;
+      where.push(`
+        EXISTS (
+          SELECT 1
+          FROM gcategorias c
+          WHERE c.grcat = $${idx}
+            AND LOWER(TRIM(c.grandescategorias)) = LOWER(TRIM(m.grupo))
+        )
+      `);
     } else if (catTokens.length > 1) {
-      const placeholders = catTokens.map((_, i) => `$${values.length + i + 1}`).join(', ');
-      values.push(...catTokens);
-      where.push(`c.grcat IN (${placeholders})`);
+      values.push(catTokens);
+      const idx = values.length;
+      where.push(`
+        EXISTS (
+          SELECT 1
+          FROM gcategorias c
+          WHERE c.grcat = ANY($${idx})
+            AND LOWER(TRIM(c.grandescategorias)) = LOWER(TRIM(m.grupo))
+        )
+      `);
     }
 
-    // 2b) Por cada palabra, exige que esté en palabrasclave2 O descripcion_corta (AND entre palabras)
+    // 2b) Palabras: AND entre tokens; cada token hace OR entre campos
     for (const tok of wordTokens) {
       values.push(`%${tok}%`);
-      const idx = values.length;
-      where.push(`(COALESCE(m.palabrasclave2,'') ILIKE $${idx} OR COALESCE(m.descripcion_corta,'') ILIKE $${idx})`);
+      const i1 = values.length;
+      where.push(`(COALESCE(m.palabrasclave2,'') ILIKE $${i1} OR COALESCE(m.descripcion_corta,'') ILIKE $${i1})`);
     }
 
-    // --- SQL final
+    // ---- SQL final
     const sql = `
       SELECT
         m.id,
@@ -168,11 +198,15 @@ app.get('/api/mercaderia', async (req, res) => {
         m.iva,
         m.margen,
         m.grupo,
-        c.grcat,                 -- expuesto para el front si lo necesita
+        -- Traemos el grcat calculado (si existe match) por conveniencia del front
+        (
+          SELECT c.grcat
+          FROM gcategorias c
+          WHERE LOWER(TRIM(c.grandescategorias)) = LOWER(TRIM(m.grupo))
+          LIMIT 1
+        ) AS grcat,
         m.fechaordengrupo
       FROM mercaderia m
-      LEFT JOIN gcategorias c
-        ON m.grupo = c.grandescategorias
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       ORDER BY
         NULLIF(TRIM(m.grupo), '') ASC NULLS LAST,
@@ -181,11 +215,12 @@ app.get('/api/mercaderia', async (req, res) => {
       LIMIT 1000;
     `;
 
+    // Logs de depuración
     console.log('➡️ /api/mercaderia SQL:', sql.replace(/\s+/g, ' ').trim());
     console.log('➡️ /api/mercaderia values:', values);
 
     const { rows } = await pool.query(sql, values);
-    res.json(rows); // el front espera SIEMPRE un array
+    res.json(rows);
   } catch (err) {
     console.error('❌ Error al obtener productos:', {
       message: err.message,
