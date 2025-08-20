@@ -107,59 +107,57 @@ app.get('/api/buscar-categorias', async (req, res) => {
   }
 });
 
-// Productos por grcat
-// Productos por categoría o por búsqueda
-// Productos por categoría o por búsqueda (búsqueda por CONTIENE en palabrasclave2, con múltiples términos)
+
+// Orden: por grupo ASC y luego por fechaordengrupo DESC; sólo visibilidad = MOSTRAR
 app.get('/api/mercaderia', async (req, res) => {
   try {
     const { grcat, buscar } = req.query;
 
-    const where = [];
+    const where = [`COALESCE(m.visibilidad,'') ILIKE 'MOSTRAR'`];
     const values = [];
 
-    // Filtro por categoría (igualdad exacta)
+    // Filtro por categoría usando JOIN (m.grupo ↔ c.grandescategorias)
     if (grcat && grcat.trim() !== '') {
       values.push(grcat.trim());
-      where.push(`grcat = $${values.length}`);
+      where.push(`c.grcat = $${values.length}`);
     }
 
-    // Filtro por búsqueda "contiene" en palabrasclave2 (soporta varios términos separados por espacio o coma)
+    // Búsqueda "contiene" (soporta varios términos separados por espacio o coma)
     if (buscar && buscar.trim() !== '') {
       const tokens = buscar
         .split(/[,\s]+/g)
         .map(t => t.trim())
         .filter(Boolean);
 
-      if (tokens.length > 0) {
-        const sub = tokens.map(() => {
-          values.push(`%${tokens[values.length - (grcat ? 1 : 0)] ?? ''}%`); // placeholder, se reemplaza abajo
-          return `COALESCE(palabrasclave2, '') ILIKE $${values.length}`;
-        });
-        // Corregir push de values con los tokens reales
-        values.splice(grcat ? 1 : 0); // reset después del primer push si había grcat
-        if (grcat && grcat.trim() !== '') values.push(grcat.trim()); // reinsert grcat
-        for (const tok of tokens) values.push(`%${tok}%`);
-
-        where.push(`(${sub.join(' AND ')})`);
+      // Exigimos que TODOS los tokens estén en palabrasclave2 o en descripcion_corta (AND)
+      for (const tok of tokens) {
+        values.push(`%${tok}%`);
+        const idx = values.length;
+        where.push(`(COALESCE(m.palabrasclave2,'') ILIKE $${idx} OR COALESCE(m.descripcion_corta,'') ILIKE $${idx})`);
       }
     }
 
     const sql = `
       SELECT
-        id,
-        codigo_int,
-        descripcion_corta,
-        imagen1,
-        imagearray,
-        costosiniva,
-        iva,
-        margen,
-        grupo,
-        grcat,
-        fechaordengrupo
-      FROM mercaderia
+        m.id,
+        m.codigo_int,
+        m.descripcion_corta,
+        m.imagen1,
+        m.imagearray,
+        m.costosiniva,
+        m.iva,
+        m.margen,
+        m.grupo,
+        c.grcat,               -- lo exponemos para el front si lo necesita
+        m.fechaordengrupo
+      FROM mercaderia m
+      LEFT JOIN gcategorias c
+        ON m.grupo = c.grandescategorias
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-      ORDER BY codigo_int ASC
+      ORDER BY
+        NULLIF(TRIM(m.grupo), '') ASC NULLS LAST,
+        NULLIF(TRIM(m.fechaordengrupo), '') DESC NULLS LAST,
+        m.codigo_int ASC
       LIMIT 1000;
     `;
 
@@ -184,6 +182,8 @@ app.get('/api/mercaderia', async (req, res) => {
     });
   }
 });
+
+
 
 
 
