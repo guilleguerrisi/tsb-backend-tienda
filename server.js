@@ -109,6 +109,9 @@ app.get('/api/buscar-categorias', async (req, res) => {
 
 
 // Orden: por grupo ASC y luego por fechaordengrupo DESC; sólo visibilidad = MOSTRAR
+// Productos por categoría (grcat) o por búsqueda (tokens "contiene")
+// Admite: ?buscar=cat00083  |  ?buscar=vasos cristal  |  ?buscar=cat00083 vasos
+// Orden: grupo ASC, fechaordengrupo DESC, luego código
 app.get('/api/mercaderia', async (req, res) => {
   try {
     const { grcat, buscar } = req.query;
@@ -116,27 +119,44 @@ app.get('/api/mercaderia', async (req, res) => {
     const where = [`COALESCE(m.visibilidad,'') ILIKE 'MOSTRAR'`];
     const values = [];
 
-    // Filtro por categoría usando JOIN (m.grupo ↔ c.grandescategorias)
+    // --- 1) Filtrado por categoría explícita (param grcat)
     if (grcat && grcat.trim() !== '') {
       values.push(grcat.trim());
       where.push(`c.grcat = $${values.length}`);
     }
 
-    // Búsqueda "contiene" (soporta varios términos separados por espacio o coma)
+    // --- 2) Param "buscar": puede traer códigos de categoría (cat00083) y/o palabras
+    let catTokens = [];
+    let wordTokens = [];
     if (buscar && buscar.trim() !== '') {
       const tokens = buscar
         .split(/[,\s]+/g)
         .map(t => t.trim())
         .filter(Boolean);
 
-      // Exigimos que TODOS los tokens estén en palabrasclave2 o en descripcion_corta (AND)
-      for (const tok of tokens) {
-        values.push(`%${tok}%`);
-        const idx = values.length;
-        where.push(`(COALESCE(m.palabrasclave2,'') ILIKE $${idx} OR COALESCE(m.descripcion_corta,'') ILIKE $${idx})`);
-      }
+      // Separa tokens tipo cat00083 de palabras normales
+      catTokens = tokens.filter(t => /^cat\d+$/i.test(t)).map(t => t.toLowerCase());
+      wordTokens = tokens.filter(t => !/^cat\d+$/i.test(t));
     }
 
+    // 2a) Si en "buscar" vinieron códigos de categoría, filtra por c.grcat (IN ó =)
+    if (catTokens.length === 1) {
+      values.push(catTokens[0]);
+      where.push(`c.grcat = $${values.length}`);
+    } else if (catTokens.length > 1) {
+      const placeholders = catTokens.map((_, i) => `$${values.length + i + 1}`).join(', ');
+      values.push(...catTokens);
+      where.push(`c.grcat IN (${placeholders})`);
+    }
+
+    // 2b) Por cada palabra, exige que esté en palabrasclave2 O descripcion_corta (AND entre palabras)
+    for (const tok of wordTokens) {
+      values.push(`%${tok}%`);
+      const idx = values.length;
+      where.push(`(COALESCE(m.palabrasclave2,'') ILIKE $${idx} OR COALESCE(m.descripcion_corta,'') ILIKE $${idx})`);
+    }
+
+    // --- SQL final
     const sql = `
       SELECT
         m.id,
@@ -148,7 +168,7 @@ app.get('/api/mercaderia', async (req, res) => {
         m.iva,
         m.margen,
         m.grupo,
-        c.grcat,               -- lo exponemos para el front si lo necesita
+        c.grcat,                 -- expuesto para el front si lo necesita
         m.fechaordengrupo
       FROM mercaderia m
       LEFT JOIN gcategorias c
@@ -165,7 +185,7 @@ app.get('/api/mercaderia', async (req, res) => {
     console.log('➡️ /api/mercaderia values:', values);
 
     const { rows } = await pool.query(sql, values);
-    res.json(rows); // el frontend espera SIEMPRE un array
+    res.json(rows); // el front espera SIEMPRE un array
   } catch (err) {
     console.error('❌ Error al obtener productos:', {
       message: err.message,
