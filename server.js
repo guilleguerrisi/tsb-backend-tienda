@@ -140,7 +140,7 @@ app.get('/api/mercaderia', async (req, res) => {
         fechaordengrupo
       FROM mercaderia
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-      ORDER BY COALESCE(fechaordengrupo, '') DESC, codigo_int ASC
+      ORDER BY fechaordengrupo DESC NULLS LAST, codigo_int ASC
       LIMIT 1000;
     `;
 
@@ -148,12 +148,13 @@ app.get('/api/mercaderia', async (req, res) => {
     console.log('➡️ /api/mercaderia values:', values);
 
     const { rows } = await pool.query(sql, values);
-    res.json(rows); // el frontend espera SIEMPRE un array acá
+    res.json(rows);
   } catch (err) {
     console.error('❌ Error al obtener productos:', err);
     res.status(500).json({ error: 'Error al obtener productos' });
   }
 });
+
 
 
 
