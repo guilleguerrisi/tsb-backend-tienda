@@ -1,6 +1,9 @@
 // server.js
 const express = require('express');
 const app = express();
+// (opcional) logs HTTP para ver el Origin en Railway
+try { app.use(require('morgan')('combined')); } catch (_) {}
+
 const {
   pool,
   crearPedidoTienda,
@@ -10,10 +13,8 @@ const {
   buscarCategoriasPorPalabra,
 } = require('./db');
 
-// ---------- Middlewares ----------
-app.use(express.json());
-
 // ---------- CORS sólido (whitelist + preflight) ----------
+// ⚠️ PONER ESTO *ANTES* DE express.json() y de las rutas
 const allowedOrigins = new Set([
   'https://www.bazaronlinesalta.com.ar',
   'https://bazaronlinesalta.com.ar',
@@ -21,26 +22,53 @@ const allowedOrigins = new Set([
 ]);
 
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
+  const origin = req.headers.origin || '';
+  const acrh = req.headers['access-control-request-headers'] || ''; // p.ej. "content-type, x-custom"
 
-  if (origin) res.header('Vary', 'Origin');
+  // Para que caches/proxies no mezclen respuestas por origen
+  res.setHeader('Vary', 'Origin, Access-Control-Request-Headers, Access-Control-Request-Method');
+
+  // Si llega un Origin conocido, reflejarlo
   if (origin && allowedOrigins.has(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
 
-  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  // Siempre declarar métodos permitidos
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
 
-  // Preflight directo
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  // Reflejar exactamente los headers que pidió el navegador en el preflight
+  // (si no mandó nada, damos un set razonable por defecto)
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    acrh ? acrh : 'Content-Type, Authorization'
+  );
+
+  // Preflight: responder y cortar el flujo YA MISMO
+  if (req.method === 'OPTIONS') {
+    // importante: 204 sin body
+    return res.sendStatus(204);
+  }
+
+  // Log para verificar qué Origin llega realmente (miralo en Railway Logs)
+  if (req.path === '/health' || req.path.startsWith('/api/')) {
+    console.log('CORS DEBUG → Origin recibido:', origin || '(sin origin)');
+  }
+
   next();
 });
+
+// ---------- Middlewares ----------
+// Recién acá parseamos JSON, para no interferir con el preflight
+app.use(express.json());
 
 // ---------- Healthcheck ----------
 app.get('/health', (req, res) =>
   res.json({ ok: true, time: new Date().toISOString() })
 );
+
+// (…aquí siguen tus rutas /api/verificar-dispositivo, /api/categorias, etc. sin cambios…)
+
 
 // ============================
 // 🔒 VERIFICACIÓN DE USUARIO
