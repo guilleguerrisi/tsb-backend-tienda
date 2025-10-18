@@ -25,29 +25,22 @@ const allowedOrigins = [
 app.use(morgan('tiny'));
 app.use(express.json());
 
-// ---------- CORS (paquete oficial + preflight) ----------
-const corsOptionsDelegate = (origin, cb) => {
-  // Permite navegadores con Origin permitido y también herramientas sin Origin (curl/postman)
-  if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
-  console.warn('❌ CORS bloqueado. Origin:', origin);
-  return cb(new Error('Not allowed by CORS'));
+// ---------- CORS (paquete oficial + preflight correcto) ----------
+const corsOptions = {
+  origin: (origin, cb) => {
+    // Permite navegadores con Origin permitido y también herramientas sin Origin (curl/postman)
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    console.warn('❌ CORS bloqueado. Origin:', origin);
+    return cb(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 };
 
-app.use(
-  cors({
-    origin: corsOptionsDelegate,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
-
-// Preflight para todos los paths
-app.options('*', (req, res) => {
-  const reqHeaders = req.header('Access-Control-Request-Headers');
-  if (reqHeaders) res.header('Access-Control-Allow-Headers', reqHeaders);
-  res.sendStatus(204);
-});
+// Debe ir antes de las rutas
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // Maneja automáticamente el preflight
 
 // Log rápido (útil en Railway logs)
 app.use((req, _res, next) => {
