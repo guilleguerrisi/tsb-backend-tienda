@@ -1,8 +1,8 @@
 // server.js
 const express = require('express');
+const cors = require('cors');
+const morgan = require('morgan');
 const app = express();
-// (opcional) logs HTTP para ver el Origin en Railway
-try { app.use(require('morgan')('combined')); } catch (_) {}
 
 const {
   pool,
@@ -13,94 +13,81 @@ const {
   buscarCategoriasPorPalabra,
 } = require('./db');
 
-// ---------- CORS sólido (whitelist + preflight) ----------
-// ⚠️ PONER ESTO *ANTES* DE express.json() y de las rutas
-const allowedOrigins = new Set([
+// ---------- Vars ----------
+const allowedOrigins = [
   'https://www.bazaronlinesalta.com.ar',
   'https://bazaronlinesalta.com.ar',
   'http://localhost:3000',
-]);
+];
 
-app.use((req, res, next) => {
-  const origin = req.headers.origin || '';
-  const acrh = req.headers['access-control-request-headers'] || ''; // p.ej. "content-type, x-custom"
+// ---------- Middlewares base ----------
+app.use(morgan('tiny'));
+app.use(express.json());
 
-  // Para que caches/proxies no mezclen respuestas por origen
-  res.setHeader('Vary', 'Origin, Access-Control-Request-Headers, Access-Control-Request-Method');
+// ---------- CORS (paquete oficial + preflight) ----------
+app.use(
+  cors({
+    origin(origin, cb) {
+      // Permite peticiones de navegadores con origin en whitelist y también tools sin Origin (curl/postman)
+      if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+      console.warn('❌ CORS bloqueado. Origin:', origin);
+      return cb(new Error('Not allowed by CORS'));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  })
+);
+// Responder preflight para todos los paths
+app.options('*', cors());
 
-  // Si llega un Origin conocido, reflejarlo
-  if (origin && allowedOrigins.has(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
-
-  // Siempre declarar métodos permitidos
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-
-  // Reflejar exactamente los headers que pidió el navegador en el preflight
-  // (si no mandó nada, damos un set razonable por defecto)
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    acrh ? acrh : 'Content-Type, Authorization'
-  );
-
-  // Preflight: responder y cortar el flujo YA MISMO
+// Log rápido para validar qué origin llega y método (útil en Railway logs)
+app.use((req, _res, next) => {
   if (req.method === 'OPTIONS') {
-    // importante: 204 sin body
-    return res.sendStatus(204);
+    console.log('➡️ PRELIGHT', req.method, req.path, 'Origin:', req.headers.origin);
+  } else {
+    console.log('➡️', req.method, req.path, 'Origin:', req.headers.origin || '—');
   }
-
-  // Log para verificar qué Origin llega realmente (miralo en Railway Logs)
-  if (req.path === '/health' || req.path.startsWith('/api/')) {
-    console.log('CORS DEBUG → Origin recibido:', origin || '(sin origin)');
-  }
-
   next();
 });
-
-// ---------- Middlewares ----------
-// Recién acá parseamos JSON, para no interferir con el preflight
-app.use(express.json());
 
 // ---------- Healthcheck ----------
 app.get('/health', (req, res) =>
   res.json({ ok: true, time: new Date().toISOString() })
 );
 
-// (…aquí siguen tus rutas /api/verificar-dispositivo, /api/categorias, etc. sin cambios…)
-
-
 // ============================
 // 🔒 VERIFICACIÓN DE USUARIO
 // ============================
 app.post('/api/verificar-dispositivo', async (req, res) => {
   const device_id = req.body.device_id || req.body.deviceId;
-  if (!device_id)
+  if (!device_id) {
     return res.status(400).json({ autorizado: false, error: 'Device ID requerido' });
+  }
 
   try {
     const { rows } = await pool.query(
       `SELECT id FROM usuarios_admin WHERE nombre_usuario = $1 LIMIT 1`,
       [device_id]
     );
-    res.json({ autorizado: rows.length > 0 });
+    return res.json({ autorizado: rows.length > 0 });
   } catch (error) {
     console.error('❌ Error al verificar usuario autorizado:', error);
-    res.status(500).json({ autorizado: false, error: 'Error interno' });
+    return res.status(500).json({ autorizado: false, error: 'Error interno' });
   }
 });
 
 // ============================
 // 📦 CATEGORÍAS
 // ============================
-app.get('/api/categorias', async (req, res) => {
+app.get('/api/categorias', async (_req, res) => {
   try {
     const { data, error } = await obtenerCategoriasVisibles();
     if (error) return res.status(500).json({ error: 'Error al obtener categorías' });
-    res.json(data);
+    return res.json(data);
   } catch (err) {
     console.error('❌ /api/categorias:', err);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -111,10 +98,10 @@ app.get('/api/buscar-categorias', async (req, res) => {
   try {
     const { data, error } = await buscarCategoriasPorPalabra(palabra);
     if (error) return res.status(500).json({ error: 'Error al buscar categorías' });
-    res.json(data);
+    return res.json(data);
   } catch (err) {
     console.error('❌ /api/buscar-categorias:', err);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -127,9 +114,7 @@ app.get('/api/mercaderia', async (req, res) => {
     const where = [`LOWER(COALESCE(m.visibilidad, '')) = 'mostrar'`];
     const values = [];
 
-    const texto =
-      buscar?.trim() || grcat?.trim() || '';
-
+    const texto = (buscar?.trim() || grcat?.trim() || '');
     if (texto) {
       const tokens = texto.split(/[,\s]+/g).map(t => t.trim()).filter(Boolean);
       for (const tok of tokens) {
@@ -166,10 +151,10 @@ app.get('/api/mercaderia', async (req, res) => {
     console.log('➡️ /api/mercaderia values:', values);
 
     const { rows } = await pool.query(sql, values);
-    res.json(rows);
+    return res.json(rows);
   } catch (err) {
     console.error('❌ Error al obtener productos:', err);
-    res.status(500).json({ error: 'DB_ERROR', message: err.message });
+    return res.status(500).json({ error: 'DB_ERROR', message: err.message });
   }
 });
 
@@ -181,10 +166,10 @@ app.post('/api/pedidos', async (req, res) => {
   try {
     const { data, error } = await crearPedidoTienda(nuevoPedido);
     if (error) return res.status(500).json({ error: 'Error al crear pedido' });
-    res.json({ data: { id: data.id } });
+    return res.json({ data: { id: data.id } });
   } catch (err) {
     console.error('❌ Error al crear pedido tienda:', err);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -193,10 +178,10 @@ app.get('/api/pedidos/:id', async (req, res) => {
   try {
     const { data, error } = await obtenerPedidoTiendaPorId(id);
     if (error) return res.status(404).json({ error: 'Pedido no encontrado' });
-    res.json(data);
+    return res.json(data);
   } catch (err) {
     console.error('❌ Error al obtener pedido tienda:', err);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -206,10 +191,10 @@ app.get('/api/pedidos/cliente/:clienteID', async (req, res) => {
     const { data, error } = await obtenerPedidoPorCliente(clienteID);
     if (error) return res.status(500).json({ error: 'Error interno del servidor' });
     if (!data) return res.status(404).json({ error: 'No se encontró pedido' });
-    res.json(data);
+    return res.json(data);
   } catch (err) {
     console.error('❌ Error al buscar pedido por cliente:', err);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -236,16 +221,14 @@ app.patch('/api/pedidos/:id', async (req, res) => {
     ];
     const { rows } = await pool.query(query, values);
     if (rows.length === 0) return res.status(404).json({ error: 'Pedido no encontrado' });
-    res.json({ data: { id: rows[0].id } });
+    return res.json({ data: { id: rows[0].id } });
   } catch (err) {
     console.error('❌ Error al actualizar pedido tienda:', err);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
-// ============================
-// 🚀 INICIAR SERVIDOR
-// ============================
+// ---------- Start ----------
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Servidor backend corriendo en el puerto ${PORT}`);
