@@ -40,8 +40,63 @@ const gracefulShutdown = async (signal) => {
 };
 ['SIGINT', 'SIGTERM'].forEach(sig => process.on(sig, () => gracefulShutdown(sig)));
 
+
 // ============================
-// 📦 FUNCIONES PEDIDOS TIENDA
+// 📂 FUNCIONES DE CATEGORÍAS
+// ============================
+
+// ✔ Visibles y ordenadas por el valor numérico de `catcat` (si no hay número, al final).
+async function obtenerCategoriasVisibles() {
+  try {
+    const query = `
+      SELECT id, grandescategorias, grcat, imagen_url, catcat
+      FROM gcategorias
+      WHERE LOWER(mostrarcat) = 'mostrar'
+      ORDER BY
+        (
+          REPLACE(
+            SUBSTRING(TRIM(catcat::text) FROM '(-?[0-9]+(?:[.,][0-9]+)?)'),
+            ',', '.'
+          )
+        )::numeric NULLS LAST,
+        grandescategorias ASC
+    `;
+    const { rows } = await pool.query(query);
+    return { data: rows, error: null };
+  } catch (err) {
+    console.error('❌ Error al obtener categorías:', err);
+    return { data: null, error: err };
+  }
+}
+
+// ✔ Búsqueda por palabra clave con el mismo orden que arriba.
+async function buscarCategoriasPorPalabra(palabra) {
+  try {
+    const query = `
+      SELECT id, grandescategorias, grcat, imagen_url, catcat
+      FROM gcategorias
+      WHERE pc_categorias ILIKE '%' || $1 || '%'
+        AND mostrarcat ILIKE 'mostrar'
+      ORDER BY
+        (
+          REPLACE(
+            SUBSTRING(TRIM(catcat::text) FROM '(-?[0-9]+(?:[.,][0-9]+)?)'),
+            ',', '.'
+          )
+        )::numeric NULLS LAST,
+        grandescategorias ASC
+    `;
+    const { rows } = await pool.query(query, [palabra.trim()]);
+    return { data: rows, error: null };
+  } catch (err) {
+    console.error('❌ Error en buscarCategoriasPorPalabra:', err);
+    return { data: null, error: err };
+  }
+}
+
+
+// ============================
+// 🛒 FUNCIONES PEDIDOS TIENDA
 // ============================
 
 // Crear un nuevo pedido
@@ -124,7 +179,11 @@ const obtenerPedidoTiendaPorId = async (id) => {
 };
 
 module.exports = {
-  pool, // exportar el pool es correcto
+  pool,
+  // categorías
+  obtenerCategoriasVisibles,
+  buscarCategoriasPorPalabra,
+  // pedidos
   crearPedidoTienda,
   obtenerPedidoTiendaPorId,
   obtenerPedidoPorCliente,
