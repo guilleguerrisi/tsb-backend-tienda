@@ -2,6 +2,7 @@
 const express = require('express');
 const cors = require('cors');
 const app = express();
+
 const {
   pool,
   crearPedidoTienda,
@@ -9,15 +10,34 @@ const {
   obtenerPedidoPorCliente,
 } = require('./db');
 
-app.use(cors());
+// ---------- Middlewares ----------
 app.use(express.json());
+
+// CORS con whitelist (prod)
+const allowed = [
+  'https://www.bazaronlinesalta.com.ar',
+  'https://bazaronlinesalta.com.ar',
+  'http://localhost:3000',
+];
+app.use(
+  cors({
+    origin(origin, cb) {
+      if (!origin || allowed.includes(origin)) return cb(null, true);
+      return cb(new Error('Not allowed by CORS'));
+    },
+    credentials: true,
+  })
+);
+
+// ---------- Healthcheck ----------
+app.get('/health', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
 // ============================
 // 🔒 VERIFICACIÓN DE USUARIO
 // ============================
-
 app.post('/api/verificar-dispositivo', async (req, res) => {
-  const { device_id } = req.body;
+  // acepta device_id o deviceId
+  const device_id = req.body.device_id || req.body.deviceId;
 
   if (!device_id) {
     return res.status(400).json({ autorizado: false, error: 'Device ID requerido' });
@@ -48,10 +68,7 @@ app.post('/api/verificar-dispositivo', async (req, res) => {
 // 📦 CATEGORÍAS Y PRODUCTOS
 // ============================
 
-// Categorías visibles
-// ✅ Orden robusto por número en catcat, funcione si catcat es TEXT o INTEGER.
-//    - Extrae el PRIMER número (permite coma o punto) desde catcat::text.
-//    - Si no hay número, queda al final (NULLS LAST).
+// Categorías visibles (orden numérico robusto)
 app.get('/api/categorias', async (req, res) => {
   try {
     const result = await pool.query(`
@@ -74,8 +91,7 @@ app.get('/api/categorias', async (req, res) => {
   }
 });
 
-// Búsqueda de categorías por palabra clave
-// ✅ Mismo orden numérico robusto que arriba.
+// Buscar categorías por palabra (mismo orden)
 app.get('/api/buscar-categorias', async (req, res) => {
   const { palabra } = req.query;
 
@@ -107,23 +123,19 @@ app.get('/api/buscar-categorias', async (req, res) => {
   }
 });
 
-
-
-// - Orden: grupo ASC, fechaordengrupo DESC, codigo_int ASC
+// Productos
 app.get('/api/mercaderia', async (req, res) => {
   try {
     const { buscar, grcat } = req.query;
 
-    // 1) Base: mostrar solo productos visibles
     const where = [`LOWER(COALESCE(m.visibilidad, '')) = 'mostrar'`];
     const values = [];
 
-    // 2) Texto de búsqueda: prioriza "buscar", si no hay usa grcat como texto
-    const texto = (buscar && buscar.trim() !== '')
-      ? buscar.trim()
-      : (grcat && grcat.trim() !== '' ? grcat.trim() : '');
+    const texto =
+      (buscar && buscar.trim() !== '')
+        ? buscar.trim()
+        : (grcat && grcat.trim() !== '' ? grcat.trim() : '');
 
-    // 3) Tokeniza por espacios o comas. AND entre tokens, cada token hace OR entre campos
     if (texto) {
       const tokens = texto
         .split(/[,\s]+/g)
@@ -133,7 +145,9 @@ app.get('/api/mercaderia', async (req, res) => {
       for (const tok of tokens) {
         values.push(`%${tok}%`);
         const idx = values.length;
-        where.push(`(COALESCE(m.palabrasclave2, '') ILIKE $${idx} OR COALESCE(m.descripcion_corta, '') ILIKE $${idx})`);
+        where.push(
+          `(COALESCE(m.palabrasclave2, '') ILIKE $${idx} OR COALESCE(m.descripcion_corta, '') ILIKE $${idx})`
+        );
       }
     }
 
@@ -158,7 +172,6 @@ app.get('/api/mercaderia', async (req, res) => {
       LIMIT 1000;
     `;
 
-    // Logs útiles para depurar
     console.log('➡️ /api/mercaderia SQL:', sql.replace(/\s+/g, ' ').trim());
     console.log('➡️ /api/mercaderia values:', values);
 
@@ -180,13 +193,6 @@ app.get('/api/mercaderia', async (req, res) => {
     });
   }
 });
-
-
-
-
-
-
-
 
 // ============================
 // 🛒 RUTAS DE PEDIDOS TIENDA
@@ -253,15 +259,10 @@ app.get('/api/pedidos/cliente/:clienteID', async (req, res) => {
   }
 });
 
-// Actualizar pedido (array_pedido + mensaje_cliente + contacto_cliente + nombre_cliente)
+// Actualizar pedido
 app.patch('/api/pedidos/:id', async (req, res) => {
   const { id } = req.params;
-  const {
-    array_pedido,
-    mensaje_cliente,
-    contacto_cliente,
-    nombre_cliente
-  } = req.body;
+  const { array_pedido, mensaje_cliente, contacto_cliente, nombre_cliente } = req.body;
 
   try {
     const query = `
@@ -298,7 +299,8 @@ app.patch('/api/pedidos/:id', async (req, res) => {
 // 🚀 INICIAR SERVIDOR
 // ============================
 
-const PORT = 5000;
+// Usa el puerto que provee Railway/hosting
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Servidor backend corriendo en el puerto ${PORT}`);
 });
