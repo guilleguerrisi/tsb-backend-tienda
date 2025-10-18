@@ -22,6 +22,7 @@ const allowedOrigins = new Set([
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
+
   if (origin) res.header('Vary', 'Origin');
 
   if (origin && allowedOrigins.has(origin)) {
@@ -32,13 +33,14 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-  // Manejo de preflight
+  // Preflight: responder directamente
   if (req.method === 'OPTIONS') {
     return res.sendStatus(204);
   }
 
   next();
 });
+
 
 
 // ---------- Healthcheck ----------
