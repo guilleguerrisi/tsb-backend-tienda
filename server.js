@@ -1,4 +1,4 @@
-// server.js
+// server.js (cabecera + middlewares + CORS + health + verificación)
 const express = require('express');
 const cors = require('cors');
 const app = express();
@@ -13,24 +13,36 @@ const {
 // ---------- Middlewares ----------
 app.use(express.json());
 
-// CORS con whitelist (prod)
-const allowed = [
+// ---------- CORS con whitelist ----------
+const allowedOrigins = [
   'https://www.bazaronlinesalta.com.ar',
   'https://bazaronlinesalta.com.ar',
   'http://localhost:3000',
 ];
+
 app.use(
   cors({
-    origin(origin, cb) {
-      if (!origin || allowed.includes(origin)) return cb(null, true);
-      return cb(new Error('Not allowed by CORS'));
+    origin(origin, callback) {
+      // Permite herramientas sin origin (curl/Postman) y los orígenes de la whitelist
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      console.warn('❌ Origen bloqueado por CORS:', origin);
+      return callback(new Error('No autorizado por CORS'));
     },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   })
 );
 
+// Manejo explícito del preflight (OPTIONS)
+app.options('*', cors());
+
 // ---------- Healthcheck ----------
-app.get('/health', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+app.get('/health', (req, res) =>
+  res.json({ ok: true, time: new Date().toISOString() })
+);
 
 // ============================
 // 🔒 VERIFICACIÓN DE USUARIO
