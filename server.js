@@ -2,6 +2,7 @@
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
+
 const app = express();
 
 const {
@@ -13,7 +14,7 @@ const {
   buscarCategoriasPorPalabra,
 } = require('./db');
 
-// ---------- Vars ----------
+// ---------- Whitelist de orígenes ----------
 const allowedOrigins = [
   'https://www.bazaronlinesalta.com.ar',
   'https://bazaronlinesalta.com.ar',
@@ -25,34 +26,42 @@ app.use(morgan('tiny'));
 app.use(express.json());
 
 // ---------- CORS (paquete oficial + preflight) ----------
+const corsOptionsDelegate = (origin, cb) => {
+  // Permite navegadores con Origin permitido y también herramientas sin Origin (curl/postman)
+  if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+  console.warn('❌ CORS bloqueado. Origin:', origin);
+  return cb(new Error('Not allowed by CORS'));
+};
+
 app.use(
   cors({
-    origin(origin, cb) {
-      // Permite peticiones de navegadores con origin en whitelist y también tools sin Origin (curl/postman)
-      if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
-      console.warn('❌ CORS bloqueado. Origin:', origin);
-      return cb(new Error('Not allowed by CORS'));
-    },
+    origin: corsOptionsDelegate,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   })
 );
-// Responder preflight para todos los paths
-app.options('*', cors());
 
-// Log rápido para validar qué origin llega y método (útil en Railway logs)
+// Preflight para todos los paths
+app.options('*', (req, res) => {
+  const reqHeaders = req.header('Access-Control-Request-Headers');
+  if (reqHeaders) res.header('Access-Control-Allow-Headers', reqHeaders);
+  res.sendStatus(204);
+});
+
+// Log rápido (útil en Railway logs)
 app.use((req, _res, next) => {
   if (req.method === 'OPTIONS') {
-    console.log('➡️ PRELIGHT', req.method, req.path, 'Origin:', req.headers.origin);
+    console.log('➡️ PREFLIGHT', req.method, req.path, 'Origin:', req.headers.origin);
   } else {
     console.log('➡️', req.method, req.path, 'Origin:', req.headers.origin || '—');
   }
   next();
 });
 
-// ---------- Healthcheck ----------
-app.get('/health', (req, res) =>
+// ---------- Root & Health ----------
+app.get('/', (_req, res) => res.send('OK'));
+app.get('/health', (_req, res) =>
   res.json({ ok: true, time: new Date().toISOString() })
 );
 
