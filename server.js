@@ -14,35 +14,29 @@ const {
   buscarCategoriasPorPalabra,
 } = require('./db');
 
-// ---------- Whitelist de orígenes ----------
-const allowedOrigins = [
-  'https://www.bazaronlinesalta.com.ar',
-  'https://bazaronlinesalta.com.ar',
-  'http://localhost:3000',
-];
-
 // ---------- Middlewares base ----------
 app.use(morgan('tiny'));
 app.use(express.json());
 
-// ---------- CORS (paquete oficial + preflight correcto) ----------
-const corsOptions = {
-  origin: (origin, cb) => {
-    // Permite navegadores con Origin permitido y también herramientas sin Origin (curl/postman)
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
-    console.warn('❌ CORS bloqueado. Origin:', origin);
-    return cb(new Error('Not allowed by CORS'));
-  },
-  credentials: true,
+// ---------- CORS DEBUG MODE (muy permisivo para diagnosticar) ----------
+app.use((req, res, next) => {
+  // siempre variar por Origin por si hay proxy/caché (Cloudflare, etc.)
+  res.header('Vary', 'Origin, Access-Control-Request-Headers, Access-Control-Request-Method');
+  next();
+});
+
+// Permitir TODO (sin credenciales) — solo para test
+app.use(cors({
+  origin: (origin, cb) => cb(null, true), // permite cualquier Origin
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-};
+  credentials: false, // importante: con origin: * no se permite credentials
+}));
 
-// Debe ir antes de las rutas
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // Maneja automáticamente el preflight
+// Que cors responda los preflight
+app.options('*', cors());
 
-// Log rápido (útil en Railway logs)
+// Log útil para ver preflights y origen en Railway
 app.use((req, _res, next) => {
   if (req.method === 'OPTIONS') {
     console.log('➡️ PREFLIGHT', req.method, req.path, 'Origin:', req.headers.origin);
@@ -58,6 +52,16 @@ app.get('/health', (_req, res) =>
   res.json({ ok: true, time: new Date().toISOString() })
 );
 
+// Endpoint para ver qué te está llegando (headers) rápido
+app.get('/debug/cors', (req, res) => {
+  res.json({
+    method: req.method,
+    origin_header: req.headers.origin || null,
+    acr_method: req.headers['access-control-request-method'] || null,
+    acr_headers: req.headers['access-control-request-headers'] || null,
+    now: new Date().toISOString(),
+  });
+});
 // ============================
 // 🔒 VERIFICACIÓN DE USUARIO
 // ============================
