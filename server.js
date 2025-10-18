@@ -13,31 +13,33 @@ const {
 // ---------- Middlewares ----------
 app.use(express.json());
 
-// ---------- CORS con whitelist ----------
-const allowedOrigins = [
+// ---------- CORS sólido (whitelist + preflight) ----------
+const allowedOrigins = new Set([
   'https://www.bazaronlinesalta.com.ar',
   'https://bazaronlinesalta.com.ar',
   'http://localhost:3000',
-];
+]);
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      // Permite herramientas sin origin (curl/Postman) y los orígenes de la whitelist
-      if (!origin || allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-      console.warn('❌ Origen bloqueado por CORS:', origin);
-      return callback(new Error('No autorizado por CORS'));
-    },
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true,
-  })
-);
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) res.header('Vary', 'Origin');
 
-// Manejo explícito del preflight (OPTIONS)
-app.options('*', cors());
+  if (origin && allowedOrigins.has(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+  }
+
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  // Manejo de preflight
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
+
 
 // ---------- Healthcheck ----------
 app.get('/health', (req, res) =>
