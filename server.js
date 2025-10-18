@@ -18,23 +18,39 @@ const {
 app.use(morgan('tiny'));
 app.use(express.json());
 
-// ---------- CORS DEBUG MODE (muy permisivo para diagnosticar) ----------
+// ---------- CORS (producción: whitelist + preflight + logs + /debug/cors) ----------
+
+// Dominios permitidos
+const allowedOrigins = new Set([
+  'https://www.bazaronlinesalta.com.ar',
+  'https://bazaronlinesalta.com.ar',
+  'http://localhost:3000',
+]);
+
+// Avisar a proxies/caché que la respuesta varía por Origin y headers de preflight
 app.use((req, res, next) => {
-  // siempre variar por Origin por si hay proxy/caché (Cloudflare, etc.)
   res.header('Vary', 'Origin, Access-Control-Request-Headers, Access-Control-Request-Method');
   next();
 });
 
-// Permitir TODO (sin credenciales) — solo para test
-app.use(cors({
-  origin: (origin, cb) => cb(null, true), // permite cualquier Origin
+// Opciones de CORS
+const corsOptions = {
+  origin: (origin, cb) => {
+    // Permite requests sin Origin (curl/Postman) y orígenes whitelisted
+    if (!origin || allowedOrigins.has(origin)) return cb(null, true);
+    console.warn('❌ CORS bloqueado. Origin no permitido:', origin);
+    return cb(new Error('Not allowed by CORS'));
+  },
+  credentials: false, // poner en true SOLO si usás cookies/sesiones
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: false, // importante: con origin: * no se permite credentials
-}));
+};
 
-// Que cors responda los preflight
-app.options('*', cors());
+// Activar CORS globalmente
+app.use(cors(corsOptions));
+
+// Manejar correctamente TODOS los preflight (OPTIONS)
+app.options('*', cors(corsOptions));
 
 // Log útil para ver preflights y origen en Railway
 app.use((req, _res, next) => {
@@ -62,6 +78,7 @@ app.get('/debug/cors', (req, res) => {
     now: new Date().toISOString(),
   });
 });
+
 // ============================
 // 🔒 VERIFICACIÓN DE USUARIO
 // ============================
