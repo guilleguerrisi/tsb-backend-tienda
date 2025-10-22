@@ -2,35 +2,38 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
-// 🔐 No loguear la DATABASE_URL en prod
+let pool = null;
+
+// 🔐 Inicialización segura del pool (no rompas el proceso si falta DATABASE_URL)
 if (!process.env.DATABASE_URL) {
-  throw new Error('Falta la variable de entorno DATABASE_URL');
+  console.error('⚠️ DATABASE_URL no está definida. El pool de Postgres no se inicializa.');
+} else {
+  try {
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL, // 👉 usa aquí la URI del Session Pooler de Supabase
+      ssl: {
+        require: true,
+        rejectUnauthorized: false,
+      },
+      max: 10,
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 10_000,
+      keepAlive: true,
+      application_name: 'bazaronlinesalta-backend',
+    });
+
+    pool.on('connect', () => console.log('✅ PG pool conectado'));
+    pool.on('error', (err) => console.error('❌ PG pool error:', err));
+  } catch (e) {
+    console.error('❌ Error creando el pool PG:', e);
+  }
 }
-
-// ⚙️ Pool recomendado para Railway/Supabase
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    require: true,            // fuerza SSL en PaaS
-    rejectUnauthorized: false // Supabase/Railway suelen necesitarlo
-  },
-  // Tuning saludable (ajústalo si tu app crece)
-  max: 10,                    // conexiones máximas
-  idleTimeoutMillis: 30_000,  // cerrar conexiones ociosas
-  connectionTimeoutMillis: 10_000,
-  keepAlive: true,
-  application_name: 'bazaronlinesalta-backend'
-});
-
-// 🔎 Opcional: logs mínimos útiles
-pool.on('connect', () => console.log('✅ PG pool conectado'));
-pool.on('error', (err) => console.error('❌ PG pool error:', err));
 
 // 🧹 Cierre limpio al bajar el proceso (Railway re-deploy, etc.)
 const gracefulShutdown = async (signal) => {
   try {
     console.log(`↩️ Recibida señal ${signal}. Cerrando pool PG…`);
-    await pool.end();
+    if (pool) await pool.end();
     console.log('✅ Pool PG cerrado');
     process.exit(0);
   } catch (e) {
@@ -40,13 +43,11 @@ const gracefulShutdown = async (signal) => {
 };
 ['SIGINT', 'SIGTERM'].forEach(sig => process.on(sig, () => gracefulShutdown(sig)));
 
-
 // ============================
 // 📂 FUNCIONES DE CATEGORÍAS
 // ============================
-
-// ✔ Visibles y ordenadas por el valor numérico de `catcat` (si no hay número, al final).
 async function obtenerCategoriasVisibles() {
+  if (!pool) return { data: null, error: new Error('DB_NOT_INITIALIZED') };
   try {
     const query = `
       SELECT id, grandescategorias, grcat, imagen_url, catcat
@@ -69,8 +70,8 @@ async function obtenerCategoriasVisibles() {
   }
 }
 
-// ✔ Búsqueda por palabra clave con el mismo orden que arriba.
 async function buscarCategoriasPorPalabra(palabra) {
+  if (!pool) return { data: null, error: new Error('DB_NOT_INITIALIZED') };
   try {
     const query = `
       SELECT id, grandescategorias, grcat, imagen_url, catcat
@@ -94,18 +95,16 @@ async function buscarCategoriasPorPalabra(palabra) {
   }
 }
 
-
 // ============================
 // 🛒 FUNCIONES PEDIDOS TIENDA
 // ============================
-
-// Crear un nuevo pedido
 const crearPedidoTienda = async (nuevoPedido) => {
+  if (!pool) return { data: null, error: new Error('DB_NOT_INITIALIZED') };
   const {
     fecha_pedido,
     cliente_tienda,
     nombre_cliente,
-    array_pedido,       // si la columna es JSON/JSONB, podés mandar objeto JS
+    array_pedido,
     contacto_cliente,
     mensaje_cliente
   } = nuevoPedido;
@@ -118,14 +117,13 @@ const crearPedidoTienda = async (nuevoPedido) => {
       RETURNING id
     `;
     const values = [
-      fecha_pedido,       // ideal que sea timestamptz en DB
+      fecha_pedido,
       cliente_tienda,
       nombre_cliente,
-      array_pedido,       // si la columna es jsonb, PG serializa bien el objeto
+      array_pedido,
       contacto_cliente,
       mensaje_cliente
     ];
-
     const { rows } = await pool.query(query, values);
     return { data: rows[0], error: null };
   } catch (error) {
@@ -134,8 +132,8 @@ const crearPedidoTienda = async (nuevoPedido) => {
   }
 };
 
-// Buscar un pedido existente por cliente_tienda
 const obtenerPedidoPorCliente = async (cliente_tienda) => {
+  if (!pool) return { data: null, error: new Error('DB_NOT_INITIALIZED') };
   try {
     const query = `
       SELECT id
@@ -146,10 +144,7 @@ const obtenerPedidoPorCliente = async (cliente_tienda) => {
     `;
     const values = [cliente_tienda];
     const { rows } = await pool.query(query, values);
-
-    if (rows.length === 0) {
-      return { data: null, error: null }; // no es error si no existe
-    }
+    if (rows.length === 0) return { data: null, error: null };
     return { data: rows[0], error: null };
   } catch (error) {
     console.error('❌ Error en obtenerPedidoPorCliente:', error);
@@ -157,8 +152,8 @@ const obtenerPedidoPorCliente = async (cliente_tienda) => {
   }
 };
 
-// Obtener un pedido por su ID
 const obtenerPedidoTiendaPorId = async (id) => {
+  if (!pool) return { data: null, error: new Error('DB_NOT_INITIALIZED') };
   try {
     const query = `
       SELECT *
@@ -167,10 +162,7 @@ const obtenerPedidoTiendaPorId = async (id) => {
     `;
     const values = [id];
     const { rows } = await pool.query(query, values);
-
-    if (rows.length === 0) {
-      return { data: null, error: 'Pedido no encontrado' };
-    }
+    if (rows.length === 0) return { data: null, error: 'Pedido no encontrado' };
     return { data: rows[0], error: null };
   } catch (error) {
     console.error('❌ Error en obtenerPedidoTiendaPorId:', error);
@@ -180,10 +172,8 @@ const obtenerPedidoTiendaPorId = async (id) => {
 
 module.exports = {
   pool,
-  // categorías
   obtenerCategoriasVisibles,
   buscarCategoriasPorPalabra,
-  // pedidos
   crearPedidoTienda,
   obtenerPedidoTiendaPorId,
   obtenerPedidoPorCliente,
