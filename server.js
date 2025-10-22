@@ -16,9 +16,8 @@ const {
 
 // ---------- Middlewares base ----------
 app.use(morgan('tiny'));
-app.use(express.json());
 
-// ---------- CORS (producción: whitelist + preflight + logs + /debug/cors) ----------
+// ---------- CORS (orden crítico: antes de express.json) ----------
 
 // Dominios permitidos
 const allowedOrigins = new Set([
@@ -33,7 +32,25 @@ app.use((req, res, next) => {
   next();
 });
 
-// Opciones de CORS
+// Handler ultra-temprano de OPTIONS (preflight) — garantiza headers incluso si algo falla después
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (req.method === 'OPTIONS') {
+    if (!origin || allowedOrigins.has(origin)) {
+      // Si no hay Origin (curl/Postman), reflejar '*' evita bloqueos
+      res.header('Access-Control-Allow-Origin', origin || '*');
+      res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+      // Si NO usás cookies/sesiones de navegador, no enviar Allow-Credentials
+      // (si las usás, cambiar a: res.header('Access-Control-Allow-Credentials', 'true') y no usar '*')
+      return res.status(204).end();
+    }
+    return res.status(403).end();
+  }
+  next();
+});
+
+// Opciones de CORS (para requests reales)
 const corsOptions = {
   origin: (origin, cb) => {
     // Permite requests sin Origin (curl/Postman) y orígenes whitelisted
@@ -43,14 +60,15 @@ const corsOptions = {
   },
   credentials: false, // poner en true SOLO si usás cookies/sesiones
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  maxAge: 86400, // cache del preflight (1 día)
 };
 
-// Activar CORS globalmente
+// Activar CORS globalmente (después del handler manual de OPTIONS)
 app.use(cors(corsOptions));
 
-// Manejar correctamente TODOS los preflight (OPTIONS)
-app.options('*', cors(corsOptions));
+// (AHORA SÍ) parseo JSON después de CORS para evitar 400 sin headers CORS
+app.use(express.json());
 
 // Log útil para ver preflights y origen en Railway
 app.use((req, _res, next) => {
