@@ -14,63 +14,56 @@ const {
   buscarCategoriasPorPalabra,
 } = require('./db');
 
-// ---------- Middlewares base ----------
-app.use(morgan('tiny'));
-
-// ---------- CORS (orden crítico: antes de express.json) ----------
-
-// Dominios permitidos
+// ========== CORS: configuración ==========
 const allowedOrigins = new Set([
   'https://www.bazaronlinesalta.com.ar',
   'https://bazaronlinesalta.com.ar',
   'http://localhost:3000',
 ]);
 
-// Avisar a proxies/caché que la respuesta varía por Origin y headers de preflight
-app.use((req, res, next) => {
-  res.header('Vary', 'Origin, Access-Control-Request-Headers, Access-Control-Request-Method');
-  next();
-});
-
-// Handler ultra-temprano de OPTIONS (preflight) — garantiza headers incluso si algo falla después
+// 1) Headers CORS globales (antes que todo). Garantiza ACAO incluso en errores.
 app.use((req, res, next) => {
   const origin = req.headers.origin;
+  const allowOrigin =
+    origin && allowedOrigins.has(origin) ? origin : (origin ? origin : '*');
+
+  // Avisa a proxies/CDN que varía por origin y preflight
+  res.header('Vary', 'Origin, Access-Control-Request-Headers, Access-Control-Request-Method');
+
+  // CORS base en TODAS las respuestas
+  res.header('Access-Control-Allow-Origin', allowOrigin);
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  // Si usas cookies/sesiones del navegador: habilitar y NO usar '*'
+  // res.header('Access-Control-Allow-Credentials', 'true');
+
   if (req.method === 'OPTIONS') {
-    if (!origin || allowedOrigins.has(origin)) {
-      // Si no hay Origin (curl/Postman), reflejar '*' evita bloqueos
-      res.header('Access-Control-Allow-Origin', origin || '*');
-      res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-      // Si NO usás cookies/sesiones de navegador, no enviar Allow-Credentials
-      // (si las usás, cambiar a: res.header('Access-Control-Allow-Credentials', 'true') y no usar '*')
-      return res.status(204).end();
-    }
-    return res.status(403).end();
+    return res.status(204).end(); // preflight OK
   }
   next();
 });
 
-// Opciones de CORS (para requests reales)
+// 2) Logs
+app.use(morgan('tiny'));
+
+// 3) cors() estándar (refuerzo para requests reales)
 const corsOptions = {
   origin: (origin, cb) => {
-    // Permite requests sin Origin (curl/Postman) y orígenes whitelisted
     if (!origin || allowedOrigins.has(origin)) return cb(null, true);
     console.warn('❌ CORS bloqueado. Origin no permitido:', origin);
     return cb(new Error('Not allowed by CORS'));
   },
-  credentials: false, // poner en true SOLO si usás cookies/sesiones
+  credentials: false, // true sólo si usás cookies/sesiones
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-  maxAge: 86400, // cache del preflight (1 día)
+  maxAge: 86400,
 };
-
-// Activar CORS globalmente (después del handler manual de OPTIONS)
 app.use(cors(corsOptions));
 
-// (AHORA SÍ) parseo JSON después de CORS para evitar 400 sin headers CORS
+// 4) JSON parser (después de CORS, evita 400 sin headers)
 app.use(express.json());
 
-// Log útil para ver preflights y origen en Railway
+// Log útil de tráfico
 app.use((req, _res, next) => {
   if (req.method === 'OPTIONS') {
     console.log('➡️ PREFLIGHT', req.method, req.path, 'Origin:', req.headers.origin);
@@ -86,7 +79,7 @@ app.get('/health', (_req, res) =>
   res.json({ ok: true, time: new Date().toISOString() })
 );
 
-// Endpoint para ver qué te está llegando (headers) rápido
+// Debug rápido de CORS
 app.get('/debug/cors', (req, res) => {
   res.json({
     method: req.method,
