@@ -1,69 +1,35 @@
 // db.js
-const { Pool } = require('pg');
 require('dotenv').config();
+const { createClient } = require('@supabase/supabase-js');
 
-let pool = null;
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
 
-// 🔐 Inicialización segura del pool (no rompas el proceso si falta DATABASE_URL)
-if (!process.env.DATABASE_URL) {
-  console.error('⚠️ DATABASE_URL no está definida. El pool de Postgres no se inicializa.');
-} else {
-  try {
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL, // 👉 usa aquí la URI del Session Pooler de Supabase
-      ssl: {
-        require: true,
-        rejectUnauthorized: false,
-      },
-      max: 10,
-      idleTimeoutMillis: 30_000,
-      connectionTimeoutMillis: 10_000,
-      keepAlive: true,
-      application_name: 'bazaronlinesalta-backend',
-    });
-
-    pool.on('connect', () => console.log('✅ PG pool conectado'));
-    pool.on('error', (err) => console.error('❌ PG pool error:', err));
-  } catch (e) {
-    console.error('❌ Error creando el pool PG:', e);
-  }
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  console.error('⚠️ Faltan SUPABASE_URL o SUPABASE_ANON_KEY en el entorno.');
 }
 
-// 🧹 Cierre limpio al bajar el proceso (Railway re-deploy, etc.)
-const gracefulShutdown = async (signal) => {
-  try {
-    console.log(`↩️ Recibida señal ${signal}. Cerrando pool PG…`);
-    if (pool) await pool.end();
-    console.log('✅ Pool PG cerrado');
-    process.exit(0);
-  } catch (e) {
-    console.error('❌ Error cerrando pool PG:', e);
-    process.exit(1);
-  }
-};
-['SIGINT', 'SIGTERM'].forEach(sig => process.on(sig, () => gracefulShutdown(sig)));
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { persistSession: false },
+  global: { headers: { 'X-Client-Info': 'bazaronlinesalta-backend-anon' } },
+});
 
-// ============================
-// 📂 FUNCIONES DE CATEGORÍAS
-// ============================
+/* ============================
+   📂 CATEGORÍAS
+   ============================ */
+
 async function obtenerCategoriasVisibles() {
-  if (!pool) return { data: null, error: new Error('DB_NOT_INITIALIZED') };
   try {
-    const query = `
-      SELECT id, grandescategorias, grcat, imagen_url, catcat
-      FROM gcategorias
-      WHERE LOWER(mostrarcat) = 'mostrar'
-      ORDER BY
-        (
-          REPLACE(
-            SUBSTRING(TRIM(catcat::text) FROM '(-?[0-9]+(?:[.,][0-9]+)?)'),
-            ',', '.'
-          )
-        )::numeric NULLS LAST,
-        grandescategorias ASC
-    `;
-    const { rows } = await pool.query(query);
-    return { data: rows, error: null };
+    const { data, error } = await supabase
+      .from('gcategorias')
+      .select('id, grandescategorias, grcat, imagen_url, catcat, mostrarcat')
+      .ilike('mostrarcat', 'mostrar')
+      // orden aproximado al SQL original
+      .order('catcat', { ascending: true, nullsLast: true })
+      .order('grandescategorias', { ascending: true });
+
+    if (error) throw error;
+    return { data: data || [], error: null };
   } catch (err) {
     console.error('❌ Error al obtener categorías:', err);
     return { data: null, error: err };
@@ -71,110 +37,176 @@ async function obtenerCategoriasVisibles() {
 }
 
 async function buscarCategoriasPorPalabra(palabra) {
-  if (!pool) return { data: null, error: new Error('DB_NOT_INITIALIZED') };
   try {
-    const query = `
-      SELECT id, grandescategorias, grcat, imagen_url, catcat
-      FROM gcategorias
-      WHERE pc_categorias ILIKE '%' || $1 || '%'
-        AND mostrarcat ILIKE 'mostrar'
-      ORDER BY
-        (
-          REPLACE(
-            SUBSTRING(TRIM(catcat::text) FROM '(-?[0-9]+(?:[.,][0-9]+)?)'),
-            ',', '.'
-          )
-        )::numeric NULLS LAST,
-        grandescategorias ASC
-    `;
-    const { rows } = await pool.query(query, [palabra.trim()]);
-    return { data: rows, error: null };
+    const q = (palabra || '').trim();
+    if (!q) return { data: [], error: null };
+
+    const { data, error } = await supabase
+      .from('gcategorias')
+      .select('id, grandescategorias, grcat, imagen_url, catcat, mostrarcat, pc_categorias')
+      .ilike('mostrarcat', 'mostrar')
+      .ilike('pc_categorias', `%${q}%`)
+      .order('catcat', { ascending: true, nullsLast: true })
+      .order('grandescategorias', { ascending: true });
+
+    if (error) throw error;
+    return { data: data || [], error: null };
   } catch (err) {
     console.error('❌ Error en buscarCategoriasPorPalabra:', err);
     return { data: null, error: err };
   }
 }
 
-// ============================
-// 🛒 FUNCIONES PEDIDOS TIENDA
-// ============================
-const crearPedidoTienda = async (nuevoPedido) => {
-  if (!pool) return { data: null, error: new Error('DB_NOT_INITIALIZED') };
-  const {
-    fecha_pedido,
-    cliente_tienda,
-    nombre_cliente,
-    array_pedido,
-    contacto_cliente,
-    mensaje_cliente
-  } = nuevoPedido;
+/* ============================
+   🧾 PRODUCTOS
+   ============================ */
 
-  try {
-    const query = `
-      INSERT INTO pedidostienda 
-        (fecha_pedido, cliente_tienda, nombre_cliente, array_pedido, contacto_cliente, mensaje_cliente)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id
-    `;
-    const values = [
-      fecha_pedido,
-      cliente_tienda,
-      nombre_cliente,
-      array_pedido,
-      contacto_cliente,
-      mensaje_cliente
-    ];
-    const { rows } = await pool.query(query, values);
-    return { data: rows[0], error: null };
-  } catch (error) {
-    console.error('❌ Error en crearPedidoTienda:', error);
-    return { data: null, error };
-  }
-};
+// Construye una expresión OR con dos ramas: and(tokens en palabrasclave2) y and(tokens en descripcion_corta)
+function buildAndTokensOrExpression(tokens) {
+  const and_pal = `and(${tokens.map(t => `palabrasclave2.ilike.%${t}%`).join(',')})`;
+  const and_desc = `and(${tokens.map(t => `descripcion_corta.ilike.%${t}%`).join(',')})`;
+  return `${and_pal},${and_desc}`;
+}
 
-const obtenerPedidoPorCliente = async (cliente_tienda) => {
-  if (!pool) return { data: null, error: new Error('DB_NOT_INITIALIZED') };
+async function buscarMercaderia({ buscar, grcat }) {
   try {
-    const query = `
-      SELECT id
-      FROM pedidostienda
-      WHERE cliente_tienda = $1
-      ORDER BY fecha_pedido DESC
-      LIMIT 1
-    `;
-    const values = [cliente_tienda];
-    const { rows } = await pool.query(query, values);
-    if (rows.length === 0) return { data: null, error: null };
-    return { data: rows[0], error: null };
-  } catch (error) {
-    console.error('❌ Error en obtenerPedidoPorCliente:', error);
-    return { data: null, error };
-  }
-};
+    const texto = (buscar?.trim() || grcat?.trim() || '');
+    let query = supabase
+      .from('mercaderia')
+      .select('id, codigo_int, descripcion_corta, imagen1, imagearray, costosiniva, iva, margen, grupo, fechaordengrupo, visibilidad')
+      .ilike('visibilidad', 'mostrar');
 
-const obtenerPedidoTiendaPorId = async (id) => {
-  if (!pool) return { data: null, error: new Error('DB_NOT_INITIALIZED') };
-  try {
-    const query = `
-      SELECT *
-      FROM pedidostienda
-      WHERE id = $1
-    `;
-    const values = [id];
-    const { rows } = await pool.query(query, values);
-    if (rows.length === 0) return { data: null, error: 'Pedido no encontrado' };
-    return { data: rows[0], error: null };
-  } catch (error) {
-    console.error('❌ Error en obtenerPedidoTiendaPorId:', error);
-    return { data: null, error };
+    if (texto) {
+      const tokens = texto.split(/[,\s]+/g).map(s => s.trim()).filter(Boolean);
+      if (tokens.length) {
+        const orExpr = buildAndTokensOrExpression(tokens);
+        query = query.or(orExpr);
+      }
+    }
+
+    const { data, error } = await query
+      .order('grupo', { ascending: true, nullsLast: true })
+      .order('fechaordengrupo', { ascending: false, nullsLast: true })
+      .order('codigo_int', { ascending: true })
+      .limit(1000);
+
+    if (error) throw error;
+    return { data: data || [], error: null };
+  } catch (err) {
+    console.error('❌ Error al obtener productos:', err);
+    return { data: null, error: err };
   }
-};
+}
+
+/* ============================
+   🛒 PEDIDOS TIENDA
+   ============================ */
+
+async function crearPedidoTienda(nuevoPedido) {
+  try {
+    const { data, error } = await supabase
+      .from('pedidostienda')
+      .insert([nuevoPedido])
+      .select('id')
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (err) {
+    console.error('❌ Error en crearPedidoTienda:', err);
+    return { data: null, error: err };
+  }
+}
+
+async function obtenerPedidoTiendaPorId(id) {
+  try {
+    const { data, error } = await supabase
+      .from('pedidostienda')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return { data: null, error: 'Pedido no encontrado' };
+    return { data, error: null };
+  } catch (err) {
+    console.error('❌ Error en obtenerPedidoTiendaPorId:', err);
+    return { data: null, error: err };
+  }
+}
+
+async function obtenerPedidoPorCliente(cliente_tienda) {
+  try {
+    const { data, error } = await supabase
+      .from('pedidostienda')
+      .select('id, fecha_pedido')
+      .eq('cliente_tienda', cliente_tienda)
+      .order('fecha_pedido', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    return { data: data || null, error: null };
+  } catch (err) {
+    console.error('❌ Error en obtenerPedidoPorCliente:', err);
+    return { data: null, error: err };
+  }
+}
+
+async function actualizarPedidoParcial(id, campos) {
+  try {
+    const patch = {};
+    ['array_pedido', 'mensaje_cliente', 'contacto_cliente', 'nombre_cliente'].forEach(k => {
+      if (campos[k] !== undefined) patch[k] = campos[k];
+    });
+
+    const { data, error } = await supabase
+      .from('pedidostienda')
+      .update(patch)
+      .eq('id', id)
+      .select('id')
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (err) {
+    console.error('❌ Error en actualizarPedidoParcial:', err);
+    return { data: null, error: err };
+  }
+}
+
+/* ============================
+   🔒 USUARIOS ADMIN
+   ============================ */
+
+async function esDispositivoAutorizado(device_id) {
+  try {
+    const { count, error } = await supabase
+      .from('usuarios_admin')
+      .select('id', { count: 'exact', head: true })
+      .eq('nombre_usuario', device_id)
+      .limit(1);
+
+    if (error) throw error;
+    return { autorizado: (count || 0) > 0, error: null };
+  } catch (err) {
+    console.error('❌ Error al verificar usuario autorizado:', err);
+    return { autorizado: false, error: err };
+  }
+}
 
 module.exports = {
-  pool,
+  supabase,
+  // categorías
   obtenerCategoriasVisibles,
   buscarCategoriasPorPalabra,
+  // productos
+  buscarMercaderia,
+  // pedidos
   crearPedidoTienda,
   obtenerPedidoTiendaPorId,
   obtenerPedidoPorCliente,
+  actualizarPedidoParcial,
+  // admin
+  esDispositivoAutorizado,
 };
