@@ -1,90 +1,55 @@
 // whatsapp.js
 require('dotenv').config();
 
-// Polyfill fetch si tu runtime no lo trae (Node < 18)
+// Polyfill fetch si tu runtime < 18
 if (typeof fetch === 'undefined') {
   global.fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 }
 
+const API_VERSION = 'v22.0';  // usa la misma del curl
 const WABA_TOKEN = process.env.WABA_TOKEN;
 const PHONE_NUMBER_ID = process.env.WABA_PHONE_NUMBER_ID;
-const ALERT_TO = process.env.WABA_ALERT_TO;
-const TEMPLATE = process.env.WABA_TEMPLATE || 'order_alert';
+const ALERT_TO = (process.env.WABA_ALERT_TO || '').trim();
+const TEMPLATE = (process.env.WABA_TEMPLATE || '').trim(); // vacío = enviar texto libre
 
 function buildItemsText(arrayPedido, calcUnit) {
   try {
     const items = Array.isArray(arrayPedido) ? arrayPedido : JSON.parse(arrayPedido || '[]');
     if (!Array.isArray(items) || items.length === 0) return '(sin ítems)';
-
-    const lines = [];
-    for (const it of items.slice(0, 40)) {
+    return items.slice(0, 40).map(it => {
       const cant = Number(it.cantidad || 1);
       const unit = typeof calcUnit === 'function' ? calcUnit(it) : Number(it.price || 0);
       const subtotal = unit * cant;
-
-      const cod = (it.codigo_int || '').toString().trim();
-      const desc = (it.descripcion_corta || '').toString().trim();
-      const unitStr = new Intl.NumberFormat('es-AR').format(unit || 0);
-      const subStr  = new Intl.NumberFormat('es-AR').format(subtotal || 0);
-
-      lines.push(`${cod} x${cant} — ${desc} — $${unitStr} — Subt $${subStr}`);
-    }
-    if (items.length > 40) lines.push(`… (+${items.length - 40} ítems)`);
-    return lines.join('\n');
+      return `${(it.codigo_int||'').trim()} x${cant} — ${(it.descripcion_corta||'').trim()} — $${new Intl.NumberFormat('es-AR').format(unit)} — Subt $${new Intl.NumberFormat('es-AR').format(subtotal)}`;
+    }).join('\n');
   } catch {
     return '(error al formatear ítems)';
   }
 }
 
-// --- Envío usando PLANTILLA (recomendado; más estable a futuro) ---
 async function enviarConTemplate({ id, total, itemsText, contacto }) {
-  if (!WABA_TOKEN || !PHONE_NUMBER_ID || !ALERT_TO) {
-    console.warn('[whatsapp] Faltan variables de entorno WABA_...');
-    return;
-  }
-
-  const url = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
-
+  const url = `https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}/messages`;
   const params = [
     { type: 'text', text: String(id ?? '-') },
     { type: 'text', text: `$${new Intl.NumberFormat('es-AR').format(total || 0)}` },
     { type: 'text', text: itemsText || '(sin ítems)' },
     { type: 'text', text: contacto || '-' },
   ];
-
   const body = {
     messaging_product: 'whatsapp',
-    to: String(ALERT_TO),
+    to: ALERT_TO,
     type: 'template',
-    template: {
-      name: TEMPLATE,                 // order_alert (cuerpo con {{1}}..{{4}})
-      language: { code: 'es' },
-      components: [{ type: 'body', parameters: params }],
-    },
+    template: { name: TEMPLATE, language: { code: 'es' }, components: [{ type: 'body', parameters: params }] },
   };
-
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${WABA_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!resp.ok) {
-    const t = await resp.text().catch(() => '');
-    throw new Error(`[whatsapp] template ${resp.status} ${resp.statusText} -> ${t}`);
-  }
+  const r = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${WABA_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(`[WABA template] ${r.status} ${r.statusText} -> ${await r.text()}`);
 }
 
-// --- Envío como TEXTO LIBRE (sirve mientras testeás con el número de prueba) ---
 async function enviarComoTexto({ id, total, itemsText, contacto }) {
-  if (!WABA_TOKEN || !PHONE_NUMBER_ID || !ALERT_TO) {
-    console.warn('[whatsapp] Faltan variables de entorno WABA_...');
-    return;
-  }
-  const url = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
+  const url = `https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}/messages`;
   const body = {
     messaging_product: 'whatsapp',
-    to: String(ALERT_TO),
+    to: ALERT_TO,
     type: 'text',
     text: {
       body:
@@ -94,36 +59,30 @@ async function enviarComoTexto({ id, total, itemsText, contacto }) {
         `🛒 Detalle:\n${itemsText || '(sin ítems)'}`
     }
   };
-
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${WABA_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) {
-    const t = await resp.text().catch(() => '');
-    throw new Error(`[whatsapp] text ${resp.status} ${resp.statusText} -> ${t}`);
-  }
+  const r = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${WABA_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(`[WABA text] ${r.status} ${r.statusText} -> ${await r.text()}`);
 }
 
 async function enviarAlertaWhatsApp(payload) {
+  if (!WABA_TOKEN || !PHONE_NUMBER_ID || !ALERT_TO) {
+    console.warn('[whatsapp] Faltan WABA_TOKEN / WABA_PHONE_NUMBER_ID / WABA_ALERT_TO');
+    return;
+  }
   try {
-    // Si tenés plantilla aprobada en WhatsApp Manager (order_alert), usa template.
-    // Mientras probás con número de prueba, el texto libre funciona bien.
     if (TEMPLATE) {
+      console.log('[whatsapp] Enviando por TEMPLATE:', TEMPLATE);
       await enviarConTemplate(payload);
     } else {
+      console.log('[whatsapp] Enviando como TEXTO libre');
       await enviarComoTexto(payload);
     }
     console.log('✅ WhatsApp enviado');
   } catch (e) {
-    console.error('❌ Error enviando WhatsApp:', e.message || e);
-    // Intento de fallback a texto si falló la plantilla (útil en desarrollo)
-    try {
-      await enviarComoTexto(payload);
-      console.log('✅ WhatsApp enviado por fallback texto');
-    } catch (e2) {
-      console.error('❌ Fallback texto también falló:', e2.message || e2);
+    console.error('❌ Error WhatsApp:', e.message || e);
+    if (TEMPLATE) {
+      console.log('[whatsapp] Reintentando como texto libre…');
+      try { await enviarComoTexto(payload); console.log('✅ Enviado por fallback texto'); }
+      catch (e2) { console.error('❌ Fallback texto falló:', e2.message || e2); }
     }
   }
 }

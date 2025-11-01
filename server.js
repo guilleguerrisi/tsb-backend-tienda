@@ -165,7 +165,7 @@ app.post('/api/pedidos', async (req, res) => {
     const itemsText = buildItemsText(nuevoPedido.array_pedido, calcularPrecioMinorista);
     const contacto = normalizarTelefono(nuevoPedido.contacto_cliente);
 
-    // 🟢 Enviar WhatsApp (no bloquea la respuesta)
+    // Enviar WhatsApp (no bloquea la respuesta)
     enviarAlertaWhatsApp({ id: pedidoId, total, itemsText, contacto })
       .catch(err => console.error('[whatsapp] POST aviso falló:', err));
 
@@ -208,7 +208,7 @@ app.patch('/api/pedidos/:id', async (req, res) => {
     const itemsText = buildItemsText(campos.array_pedido, calcularPrecioMinorista);
     const contacto = normalizarTelefono(campos.contacto_cliente);
 
-    // 🟢 Enviar WhatsApp (podés condicionar para evitar duplicados)
+    // Enviar WhatsApp (podés condicionar para evitar duplicados)
     enviarAlertaWhatsApp({ id, total, itemsText, contacto })
       .catch(err => console.error('[whatsapp] PATCH aviso falló:', err));
 
@@ -216,6 +216,23 @@ app.patch('/api/pedidos/:id', async (req, res) => {
   } catch (e) {
     console.error('PATCH /api/pedidos/:id error:', e);
     return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// ============================
+// 🔎 Endpoint de prueba WhatsApp (sin pasar por el front)
+// ============================
+app.get('/api/test-whatsapp', async (_req, res) => {
+  try {
+    await enviarAlertaWhatsApp({
+      id: 'TEST-123',
+      total: 12345,
+      itemsText: 'PRUEBA x1 — Item demo — $12.345 — Subt $12.345',
+      contacto: '+5493875537070',
+    });
+    res.json({ ok: true, msg: 'WhatsApp de prueba enviado' });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message || String(e) });
   }
 });
 
