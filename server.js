@@ -1,4 +1,5 @@
 // server.js
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -18,6 +19,8 @@ const {
   actualizarPedidoParcial,
   esDispositivoAutorizado,
 } = require('./db');
+
+const { enviarAlertaWhatsApp, buildItemsText } = require('./whatsapp');
 
 // ========== CORS: configuración ==========
 const allowedOrigins = new Set([
@@ -124,13 +127,53 @@ app.get('/api/mercaderia', async (req, res) => {
 });
 
 // ============================
+// 💰 Helpers precio/total (minorista por margen de la DB)
+// ============================
+const redondearCentena = (n) => Math.round(n / 100) * 100;
+function calcularPrecioMinorista(p) {
+  const base = Number(p.costosiniva);
+  const ivaFactor = 1 + (Number(p.iva || 0) / 100);
+  const margenDB = 1 + (Number(p.margen || 0) / 100);
+  if (!Number.isFinite(base)) return 0;
+  return redondearCentena(base * ivaFactor * margenDB);
+}
+function totalizarCarrito(arrayPedido) {
+  try {
+    const items = Array.isArray(arrayPedido) ? arrayPedido : JSON.parse(arrayPedido || '[]');
+    return items.reduce((acc, it) => acc + calcularPrecioMinorista(it) * (it.cantidad || 1), 0);
+  } catch { return 0; }
+}
+
+// 🧽 Normalizar teléfono del cliente -> deja sólo dígitos y + (por si viene con espacios, guiones, etc.)
+function normalizarTelefono(t) {
+  if (!t) return '';
+  return String(t).replace(/[^\d+]/g, '').trim();
+}
+
+// ============================
 // 🛒 PEDIDOS TIENDA
 // ============================
 app.post('/api/pedidos', async (req, res) => {
-  const nuevoPedido = req.body;
-  const { data, error } = await crearPedidoTienda(nuevoPedido);
-  if (error) return res.status(500).json({ error: 'Error al crear pedido' });
-  return res.json({ data: { id: data.id } });
+  try {
+    const nuevoPedido = req.body;
+    const { data, error } = await crearPedidoTienda(nuevoPedido);
+    if (error) return res.status(500).json({ error: 'Error al crear pedido' });
+
+    // 📦 Preparar datos para WhatsApp
+    const pedidoId = data?.id;
+    const total = totalizarCarrito(nuevoPedido.array_pedido);
+    const itemsText = buildItemsText(nuevoPedido.array_pedido, calcularPrecioMinorista);
+    const contacto = normalizarTelefono(nuevoPedido.contacto_cliente);
+
+    // 🟢 Enviar WhatsApp (no bloquea la respuesta)
+    enviarAlertaWhatsApp({ id: pedidoId, total, itemsText, contacto })
+      .catch(err => console.error('[whatsapp] POST aviso falló:', err));
+
+    return res.json({ data: { id: data.id } });
+  } catch (e) {
+    console.error('POST /api/pedidos error:', e);
+    return res.status(500).json({ error: 'Error al crear pedido' });
+  }
 });
 
 app.get('/api/pedidos/:id', async (req, res) => {
@@ -149,16 +192,31 @@ app.get('/api/pedidos/cliente/:clienteID', async (req, res) => {
 });
 
 app.patch('/api/pedidos/:id', async (req, res) => {
-  const { id } = req.params;
-  const campos = {
-    array_pedido: req.body.array_pedido ?? undefined,
-    mensaje_cliente: req.body.mensaje_cliente ?? undefined,
-    contacto_cliente: req.body.contacto_cliente ?? undefined,
-    nombre_cliente: req.body.nombre_cliente ?? undefined,
-  };
-  const { data, error } = await actualizarPedidoParcial(id, campos);
-  if (error) return res.status(500).json({ error: 'Error interno del servidor' });
-  return res.json({ data: { id: data.id } });
+  try {
+    const { id } = req.params;
+    const campos = {
+      array_pedido: req.body.array_pedido ?? undefined,
+      mensaje_cliente: req.body.mensaje_cliente ?? undefined,
+      contacto_cliente: req.body.contacto_cliente ?? undefined,
+      nombre_cliente: req.body.nombre_cliente ?? undefined,
+    };
+    const { data, error } = await actualizarPedidoParcial(id, campos);
+    if (error) return res.status(500).json({ error: 'Error interno del servidor' });
+
+    // 📦 Preparar datos para WhatsApp
+    const total = totalizarCarrito(campos.array_pedido);
+    const itemsText = buildItemsText(campos.array_pedido, calcularPrecioMinorista);
+    const contacto = normalizarTelefono(campos.contacto_cliente);
+
+    // 🟢 Enviar WhatsApp (podés condicionar para evitar duplicados)
+    enviarAlertaWhatsApp({ id, total, itemsText, contacto })
+      .catch(err => console.error('[whatsapp] PATCH aviso falló:', err));
+
+    return res.json({ data: { id: data.id } });
+  } catch (e) {
+    console.error('PATCH /api/pedidos/:id error:', e);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
 });
 
 // ---------- Start ----------
