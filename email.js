@@ -47,17 +47,14 @@ function itemsTextToHtml(itemsText = '') {
 
 async function enviarCorreoNuevoPedido({ id, total, itemsText, contacto, linkPedido }) {
 
-  // ✅ Configuración obligatoria para Railway
+  // ✅ Configuración para BREVO SMTP (funciona en Railway)
   const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,            // ✅ Railway permite este puerto
-    secure: false,        // ✅ STARTTLS
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: false,
     auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD,
-    },
-    tls: {
-      rejectUnauthorized: false,
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASSWORD,
     },
   });
 
@@ -74,13 +71,13 @@ async function enviarCorreoNuevoPedido({ id, total, itemsText, contacto, linkPed
   `;
 
   await transporter.sendMail({
-    from: `"${process.env.EMAIL_FROM_NAME}" <${process.env.GMAIL_USER}>`,
+    from: `"${process.env.EMAIL_FROM_NAME}" <${process.env.SMTP_USER}>`,
     to: process.env.EMAIL_TO,
     subject: `[TSB] Nuevo pedido #${id}`,
     html,
   });
 
-  console.log("✅ Correo enviado correctamente");
+  console.log("✅ Email enviado correctamente via Brevo SMTP");
 }
 
 module.exports = { enviarCorreoNuevoPedido };
