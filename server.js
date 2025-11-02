@@ -3,6 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
+const crypto = require('crypto');
 
 process.on('unhandledRejection', (r) => console.error('💥 Unhandled Rejection:', r));
 process.on('uncaughtException', (e) => console.error('💥 Uncaught Exception:', e));
@@ -20,7 +21,7 @@ const {
   esDispositivoAutorizado,
 } = require('./db');
 
-// ✅ SOLO EMAIL
+// ✅ SOLO EMAIL (vía Brevo API desde email.js)
 const { enviarCorreoNuevoPedido } = require('./email');
 
 // ========== CORS: configuración ==========
@@ -128,7 +129,7 @@ app.get('/api/mercaderia', async (req, res) => {
 });
 
 // ============================
-// 💰 Helpers precio/total (minorista por margen de la DB)
+// 💰 Helpers precio/total
 // ============================
 const redondearCentena = (n) => Math.round(n / 100) * 100;
 function calcularPrecioMinorista(p) {
@@ -145,13 +146,13 @@ function totalizarCarrito(arrayPedido) {
   } catch { return 0; }
 }
 
-// 🧽 Normalizar teléfono del cliente -> deja sólo dígitos y + (por si viene con espacios, guiones, etc.)
+// 🧽 Normalizar teléfono del cliente
 function normalizarTelefono(t) {
   if (!t) return '';
   return String(t).replace(/[^\d+]/g, '').trim();
 }
 
-// 🧾 Texto de ítems para el correo (idéntico al que usábamos para WA)
+// 🧾 Texto de ítems para el correo
 function buildItemsText(arrayPedido, calcUnit) {
   try {
     const items = Array.isArray(arrayPedido) ? arrayPedido : JSON.parse(arrayPedido || '[]');
@@ -165,6 +166,31 @@ function buildItemsText(arrayPedido, calcUnit) {
   } catch {
     return '(error al formatear ítems)';
   }
+}
+
+// ============================
+// 🛡️ Anti-duplicados de email
+// ============================
+
+// cache: id -> { sig, ts }
+const recentlyNotified = new Map();
+// devuelve true si HAY que enviar (no duplicado reciente)
+function shouldSendEmail(id, signature, windowMs = 15000) {
+  const prev = recentlyNotified.get(String(id));
+  const now = Date.now();
+  if (prev && prev.sig === signature && (now - prev.ts) < windowMs) {
+    return false; // duplicado dentro de la ventana
+  }
+  recentlyNotified.set(String(id), { sig: signature, ts: now });
+  return true;
+}
+function signatureFor({ id, array_pedido, contacto }) {
+  const payload = JSON.stringify({
+    id: String(id || ''),
+    pedido: Array.isArray(array_pedido) ? array_pedido : String(array_pedido || ''),
+    contacto: String(contacto || ''),
+  });
+  return crypto.createHash('sha1').update(payload).digest('hex');
 }
 
 // ============================
@@ -182,10 +208,15 @@ app.post('/api/pedidos', async (req, res) => {
     const contacto = normalizarTelefono(nuevoPedido.contacto_cliente);
     const linkPedido = pedidoId ? `https://www.bazaronlinesalta.com.ar/carrito?id=${pedidoId}` : null;
 
-    // Email (no bloquea la respuesta)
-    enviarCorreoNuevoPedido({ id: pedidoId, total, itemsText, contacto, linkPedido })
-      .then(() => console.log('[email] POST aviso enviado'))
-      .catch(err => console.error('[email] POST aviso falló:', err));
+    // enviar solo si hay contacto y no es duplicado reciente
+    const sig = signatureFor({ id: pedidoId, array_pedido: nuevoPedido.array_pedido, contacto });
+    if (contacto && shouldSendEmail(pedidoId, sig)) {
+      enviarCorreoNuevoPedido({ id: pedidoId, total, itemsText, contacto, linkPedido })
+        .then(() => console.log('[email] POST aviso enviado'))
+        .catch(err => console.error('[email] POST aviso falló:', err));
+    } else {
+      console.log('[email] POST omitido (sin contacto o duplicado reciente)');
+    }
 
     return res.json({ data: { id: data.id } });
   } catch (e) {
@@ -226,10 +257,14 @@ app.patch('/api/pedidos/:id', async (req, res) => {
     const contacto = normalizarTelefono(campos.contacto_cliente);
     const linkPedido = id ? `https://www.bazaronlinesalta.com.ar/carrito?id=${id}` : null;
 
-    // Email (no bloquea la respuesta)
-    enviarCorreoNuevoPedido({ id, total, itemsText, contacto, linkPedido })
-      .then(() => console.log('[email] PATCH aviso enviado'))
-      .catch(err => console.error('[email] PATCH aviso falló:', err));
+    const sig = signatureFor({ id, array_pedido: campos.array_pedido, contacto });
+    if (contacto && shouldSendEmail(id, sig)) {
+      enviarCorreoNuevoPedido({ id, total, itemsText, contacto, linkPedido })
+        .then(() => console.log('[email] PATCH aviso enviado'))
+        .catch(err => console.error('[email] PATCH aviso falló:', err));
+    } else {
+      console.log('[email] PATCH omitido (sin contacto o duplicado reciente)');
+    }
 
     return res.json({ data: { id: data.id } });
   } catch (e) {
