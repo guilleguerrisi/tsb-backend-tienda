@@ -20,8 +20,7 @@ const {
   esDispositivoAutorizado,
 } = require('./db');
 
-// ✅ Import correcto
-const { enviarAlertaWhatsApp, buildItemsText } = require('./whatsapp');
+// ✅ SOLO EMAIL
 const { enviarCorreoNuevoPedido } = require('./email');
 
 // ========== CORS: configuración ==========
@@ -152,8 +151,24 @@ function normalizarTelefono(t) {
   return String(t).replace(/[^\d+]/g, '').trim();
 }
 
+// 🧾 Texto de ítems para el correo (idéntico al que usábamos para WA)
+function buildItemsText(arrayPedido, calcUnit) {
+  try {
+    const items = Array.isArray(arrayPedido) ? arrayPedido : JSON.parse(arrayPedido || '[]');
+    if (!Array.isArray(items) || items.length === 0) return '(sin ítems)';
+    return items.slice(0, 40).map(it => {
+      const cant = Number(it.cantidad || 1);
+      const unit = typeof calcUnit === 'function' ? calcUnit(it) : Number(it.price || 0);
+      const subtotal = unit * cant;
+      return `${(it.codigo_int||'').trim()} x${cant} — ${(it.descripcion_corta||'').trim()} — $${new Intl.NumberFormat('es-AR').format(unit)} — Subt $${new Intl.NumberFormat('es-AR').format(subtotal)}`;
+    }).join('\n');
+  } catch {
+    return '(error al formatear ítems)';
+  }
+}
+
 // ============================
-// 🛒 PEDIDOS TIENDA
+// 🛒 PEDIDOS TIENDA (SOLO EMAIL)
 // ============================
 app.post('/api/pedidos', async (req, res) => {
   try {
@@ -161,19 +176,15 @@ app.post('/api/pedidos', async (req, res) => {
     const { data, error } = await crearPedidoTienda(nuevoPedido);
     if (error) return res.status(500).json({ error: 'Error al crear pedido' });
 
-    // 📦 Preparar datos para WhatsApp/Email
     const pedidoId = data?.id;
     const total = totalizarCarrito(nuevoPedido.array_pedido);
     const itemsText = buildItemsText(nuevoPedido.array_pedido, calcularPrecioMinorista);
     const contacto = normalizarTelefono(nuevoPedido.contacto_cliente);
     const linkPedido = pedidoId ? `https://www.bazaronlinesalta.com.ar/carrito?id=${pedidoId}` : null;
 
-    // Enviar WhatsApp (no bloquea la respuesta)
-    enviarAlertaWhatsApp({ id: pedidoId, total, itemsText, contacto })
-      .catch(err => console.error('[whatsapp] POST aviso falló:', err));
-
-    // Enviar Email (no bloquea la respuesta)
+    // Email (no bloquea la respuesta)
     enviarCorreoNuevoPedido({ id: pedidoId, total, itemsText, contacto, linkPedido })
+      .then(() => console.log('[email] POST aviso enviado'))
       .catch(err => console.error('[email] POST aviso falló:', err));
 
     return res.json({ data: { id: data.id } });
@@ -210,18 +221,14 @@ app.patch('/api/pedidos/:id', async (req, res) => {
     const { data, error } = await actualizarPedidoParcial(id, campos);
     if (error) return res.status(500).json({ error: 'Error interno del servidor' });
 
-    // 📦 Preparar datos para WhatsApp/Email
     const total = totalizarCarrito(campos.array_pedido);
     const itemsText = buildItemsText(campos.array_pedido, calcularPrecioMinorista);
     const contacto = normalizarTelefono(campos.contacto_cliente);
     const linkPedido = id ? `https://www.bazaronlinesalta.com.ar/carrito?id=${id}` : null;
 
-    // Enviar WhatsApp (podés condicionar para evitar duplicados)
-    enviarAlertaWhatsApp({ id, total, itemsText, contacto })
-      .catch(err => console.error('[whatsapp] PATCH aviso falló:', err));
-
-    // Enviar Email (no bloquea la respuesta)
+    // Email (no bloquea la respuesta)
     enviarCorreoNuevoPedido({ id, total, itemsText, contacto, linkPedido })
+      .then(() => console.log('[email] PATCH aviso enviado'))
       .catch(err => console.error('[email] PATCH aviso falló:', err));
 
     return res.json({ data: { id: data.id } });
@@ -232,35 +239,22 @@ app.patch('/api/pedidos/:id', async (req, res) => {
 });
 
 // ============================
-// 🔎 Endpoint de prueba WhatsApp (opcional)
-// ============================
-app.get('/api/test-whatsapp', async (_req, res) => {
-  try {
-    await enviarAlertaWhatsApp({
-      id: 'TEST-123',
-      total: 12345,
-      itemsText: 'PRUEBA x1 — Item demo — $12.345 — Subt $12.345',
-      contacto: '+5493875537070',
-    });
-    res.json({ ok: true, msg: 'WhatsApp de prueba enviado' });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message || String(e) });
-  }
-});
-
-// ============================
-// 🔎 Endpoint de prueba Email (opcional)
+// 🔎 Endpoint de prueba Email
 // ============================
 app.get('/api/test-email', async (_req, res) => {
   try {
-    await enviarCorreoNuevoPedido({
+    enviarCorreoNuevoPedido({
       id: 'TEST-123',
       total: 123456,
       itemsText: 'COD-001 x2 — Vaso vidrio 300cc — $12.345 — Subt $24.690',
       contacto: '+5493875555555',
       linkPedido: 'https://www.bazaronlinesalta.com.ar/carrito?id=TEST-123',
-    });
-    res.json({ ok: true, msg: 'Email de prueba enviado' });
+    })
+    .then(() => console.log('[email] test enviado'))
+    .catch(e => console.error('[email] test error:', e));
+
+    // Respondemos INMEDIATO para evitar timeouts
+    res.json({ ok: true, msg: 'Disparamos el email de prueba (respuesta inmediata)' });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message || String(e) });
   }
