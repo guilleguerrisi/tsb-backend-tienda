@@ -1,6 +1,6 @@
-// email.js
+// email.js ✅ usando BREVO API (sin SMTP)
 require('dotenv').config();
-const nodemailer = require('nodemailer');
+const axios = require('axios');
 
 function normalizarTelefono(t) {
   if (!t) return '';
@@ -28,35 +28,20 @@ function itemsTextToHtml(itemsText = '') {
       </thead>
       <tbody>
         ${lines.map(line => {
-    const [parte1 = '', parte2 = '', parte3 = '', parte4 = ''] = line.split('—').map(s => s.trim());
-    const item = parte1;
-    const desc = parte2;
-    const unit = parte3.replace(/^\$/, '$ ');
-    const subt = parte4.replace(/^Subt\s*/, '').replace(/^\$/, '$ ');
-    return `
+          const [parte1='', parte2='', parte3='', parte4=''] = line.split('—').map(s => s.trim());
+          return `
             <tr>
-              <td><strong>${item}</strong><br><span style="color:#555">${desc}</span></td>
-              <td align="right">${unit}</td>
-              <td align="right">${subt}</td>
+              <td><strong>${parte1}</strong><br><span style="color:#555">${parte2}</span></td>
+              <td align="right">${parte3}</td>
+              <td align="right">${parte4}</td>
             </tr>`;
-  }).join('')}
+        }).join('')}
       </tbody>
     </table>
   `;
 }
 
 async function enviarCorreoNuevoPedido({ id, total, itemsText, contacto, linkPedido }) {
-
-  // ✅ Configuración para BREVO SMTP (funciona en Railway)
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: false,
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASSWORD,
-    },
-  });
 
   const html = `
     <h2>🚨 Nuevo pedido en la web</h2>
@@ -66,18 +51,29 @@ async function enviarCorreoNuevoPedido({ id, total, itemsText, contacto, linkPed
 
     ${itemsTextToHtml(itemsText)}
 
+    <br><br>
     <p><a href="${buildWaLink(contacto, id)}" target="_blank">📲 Chatear con el cliente</a></p>
     ${linkPedido ? `<p>Ver pedido: <a href="${linkPedido}" target="_blank">${linkPedido}</a></p>` : ''}
   `;
 
-  await transporter.sendMail({
-    from: `"${process.env.EMAIL_FROM_NAME}" <${process.env.EMAIL_TO}>`,
-    to: process.env.EMAIL_TO,
-    subject: `[TSB] Nuevo pedido #${id}`,
-    html,
-  });
+  // ✅ ENVIÓ VIA BREVO API (NO SMTP ⇒ NO BLOQUEADO)
+  await axios.post(
+    "https://api.brevo.com/v3/smtp/email",
+    {
+      sender: { name: process.env.EMAIL_FROM_NAME, email: process.env.EMAIL_TO },
+      to: [{ email: process.env.EMAIL_TO }],
+      subject: `[TSB] Nuevo pedido #${id}`,
+      htmlContent: html,
+    },
+    {
+      headers: {
+        "api-key": process.env.BREVO_API_KEY,
+        "Content-Type": "application/json",
+      },
+    }
+  );
 
-  console.log("✅ Email enviado correctamente via Brevo SMTP");
+  console.log("✅ Email enviado correctamente via BREVO API");
 }
 
 module.exports = { enviarCorreoNuevoPedido };
