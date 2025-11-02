@@ -28,18 +28,18 @@ function itemsTextToHtml(itemsText = '') {
       </thead>
       <tbody>
         ${lines.map(line => {
-          const [parte1='', parte2='', parte3='', parte4=''] = line.split('—').map(s => s.trim());
-          const item = parte1;
-          const desc = parte2;
-          const unit = parte3.replace(/^\$/,'$ ');
-          const subt = parte4.replace(/^Subt\s*/,'').replace(/^\$/,'$ ');
-          return `
+    const [parte1 = '', parte2 = '', parte3 = '', parte4 = ''] = line.split('—').map(s => s.trim());
+    const item = parte1;
+    const desc = parte2;
+    const unit = parte3.replace(/^\$/, '$ ');
+    const subt = parte4.replace(/^Subt\s*/, '').replace(/^\$/, '$ ');
+    return `
             <tr>
               <td><strong>${item}</strong><br><span style="color:#555">${desc}</span></td>
               <td align="right">${unit}</td>
               <td align="right">${subt}</td>
             </tr>`;
-        }).join('')}
+  }).join('')}
       </tbody>
     </table>
   `;
@@ -71,7 +71,7 @@ async function enviarCorreoNuevoPedido({ id, total, itemsText, contacto, linkPed
   `;
 
   await transporter.sendMail({
-    from: `"${process.env.EMAIL_FROM_NAME}" <${process.env.SMTP_USER}>`,
+    from: `"${process.env.EMAIL_FROM_NAME}" <${process.env.EMAIL_TO}>`,
     to: process.env.EMAIL_TO,
     subject: `[TSB] Nuevo pedido #${id}`,
     html,
