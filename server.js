@@ -105,6 +105,15 @@ app.post('/api/verificar-dispositivo', async (req, res) => {
 // ============================
 // 📦 CATEGORÍAS
 // ============================
+
+app.get('/api/rubros', async (_req, res) => {
+  const { data, error } = await obtenerRubros();
+  if (error) return res.status(500).json({ error: 'Error al obtener rubros' });
+  return res.json(data);
+});
+
+
+
 app.get('/api/categorias', async (_req, res) => {
   const { data, error } = await obtenerCategoriasVisibles();
   if (error) return res.status(500).json({ error: 'Error al obtener categorías' });
