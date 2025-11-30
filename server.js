@@ -11,6 +11,7 @@ process.on('uncaughtException', (e) => console.error('💥 Uncaught Exception:',
 const app = express();
 
 const {
+  obtenerRubros,
   obtenerCategoriasVisibles,
   buscarCategoriasPorPalabra,
   buscarMercaderia,
@@ -20,6 +21,7 @@ const {
   actualizarPedidoParcial,
   esDispositivoAutorizado,
 } = require('./db');
+
 
 // ✅ SOLO EMAIL (vía Brevo API desde email.js)
 const { enviarCorreoNuevoPedido } = require('./email');
