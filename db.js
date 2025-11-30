@@ -18,13 +18,32 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
    📂 CATEGORÍAS
    ============================ */
 
+// === RUBROS ===
+async function obtenerRubros() {
+  try {
+    const { data, error } = await supabase
+      .from('gcategorias')
+      .select('rubros')
+      .ilike('mostrarcat', 'mostrar');
+
+    if (error) throw error;
+
+    const unicos = [...new Set(data.map(r => (r.rubros || '').trim()))]
+      .filter(r => r !== '');
+
+    return { data: unicos, error: null };
+  } catch (err) {
+    console.error('❌ Error al obtener rubros:', err);
+    return { data: null, error: err };
+  }
+}
+
 async function obtenerCategoriasVisibles() {
   try {
     const { data, error } = await supabase
       .from('gcategorias')
-      .select('id, grandescategorias, grcat, imagen_url, catcat, mostrarcat')
+      .select('id, rubros, grandescategorias, grcat, imagen_url, catcat, mostrarcat')
       .ilike('mostrarcat', 'mostrar')
-      // orden aproximado al SQL original
       .order('catcat', { ascending: true, nullsLast: true })
       .order('grandescategorias', { ascending: true });
 
@@ -43,7 +62,7 @@ async function buscarCategoriasPorPalabra(palabra) {
 
     const { data, error } = await supabase
       .from('gcategorias')
-      .select('id, grandescategorias, grcat, imagen_url, catcat, mostrarcat, pc_categorias')
+      .select('id, rubros, grandescategorias, grcat, imagen_url, catcat, mostrarcat, pc_categorias')
       .ilike('mostrarcat', 'mostrar')
       .ilike('pc_categorias', `%${q}%`)
       .order('catcat', { ascending: true, nullsLast: true })
@@ -61,7 +80,6 @@ async function buscarCategoriasPorPalabra(palabra) {
    🧾 PRODUCTOS
    ============================ */
 
-// Construye una expresión OR con dos ramas: and(tokens en palabrasclave2) y and(tokens en descripcion_corta)
 function buildAndTokensOrExpression(tokens) {
   const and_pal = `and(${tokens.map(t => `palabrasclave2.ilike.%${t}%`).join(',')})`;
   const and_desc = `and(${tokens.map(t => `descripcion_corta.ilike.%${t}%`).join(',')})`;
@@ -197,16 +215,13 @@ async function esDispositivoAutorizado(device_id) {
 
 module.exports = {
   supabase,
-  // categorías
+  obtenerRubros,              // ✔️ agregado
   obtenerCategoriasVisibles,
   buscarCategoriasPorPalabra,
-  // productos
   buscarMercaderia,
-  // pedidos
   crearPedidoTienda,
   obtenerPedidoTiendaPorId,
   obtenerPedidoPorCliente,
   actualizarPedidoParcial,
-  // admin
   esDispositivoAutorizado,
 };
